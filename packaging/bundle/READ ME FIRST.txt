@@ -1,0 +1,101 @@
+===============================================================================
+  PDF to CSV
+  Turn a finance PDF into a spreadsheet, and check the numbers add up.
+===============================================================================
+
+
+HOW TO START IT
+---------------
+
+  Double-click:   Start PDF2CSV.bat
+
+  A black window opens and stays open. That is normal - it is the program
+  running. Your browser opens a page called "PDF to CSV".
+
+  Leave the black window alone while you work. Closing it stops the program.
+
+
+HOW TO USE IT
+-------------
+
+  1. Drag a PDF onto the page, or click to choose one.
+
+  2. Wait. Most documents take a second or two. A scanned document takes
+     longer - roughly ten seconds for each scanned page - because the text
+     has to be recognised from the picture.
+
+  3. Read the result at the top of the page:
+
+       "All checks passed"       The totals in your document match the rows
+                                 that were extracted. The file is good to use.
+
+       "Worth a quick look"      The totals add up, but a few cells are
+                                 highlighted for you to confirm against
+                                 the PDF.
+
+       "Checks did not pass"     Something does not reconcile. The page tells
+                                 you which check failed and which rows are
+                                 involved. Do not use the file until that is
+                                 explained.
+
+  4. Click "Download CSV". You can also download an Excel version, which has
+     the highlighted cells and the checks on their own sheets.
+
+
+WHERE YOUR FILES GO
+-------------------
+
+  Downloads go wherever your browser normally puts them.
+
+  A copy of every conversion is also kept in the "output" folder next to this
+  file, together with a small report file recording whether it reconciled.
+  That means a spreadsheet found on a shared drive weeks later can still be
+  traced back to whether its numbers were ever checked.
+
+
+IMPORTANT TO UNDERSTAND
+-----------------------
+
+  * Nothing leaves this computer. There is no upload, no cloud service and no
+    internet connection involved. The program runs entirely inside this folder.
+
+  * The checks catch arithmetic problems, not meaning. If a column adds up
+    correctly but was labelled wrongly in the original PDF, every check will
+    pass and the label will still be wrong.
+
+  * Scan quality drives result quality. A crooked, faint or low-resolution
+    scan produces worse results, and the page will tell you when it is not
+    confident about a figure.
+
+  * Unfamiliar layouts may not work. This handles the document formats it was
+    built and tested for. A new bank's template is a change request, not a
+    fault.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+
+  1. Double-click:   Check installation.bat
+
+  2. Copy everything it prints.
+
+  3. Send that, plus the file  logs\pdf2csv.log,  to whoever set this up
+     for you.
+
+  Those two things together answer nearly every question about why it will
+  not start. Neither contains any of your document's contents - only file
+  names, page counts and the results of the checks.
+
+
+MOVING OR COPYING THIS FOLDER
+-----------------------------
+
+  The whole folder is self-contained. Copy it anywhere - your desktop, a USB
+  stick, a network drive - and it will still work. Nothing is installed on
+  the computer and nothing is written outside this folder.
+
+  If you copy it from a zip file, extract the whole folder. Dragging files
+  out of the zip viewer one at a time leaves pieces behind, and the program
+  will not start.
+
+===============================================================================

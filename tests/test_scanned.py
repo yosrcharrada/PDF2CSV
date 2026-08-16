@@ -190,8 +190,11 @@ class TestScannedRoundTrip:
     def test_pages_are_routed_to_ocr(self, scanned_result):
         assert scanned_result.meta.page_kinds == [PageKind.SCANNED, PageKind.SCANNED]
 
-    def test_recovers_the_transaction_rows(self, scanned_result):
-        assert len(scanned_result.dataframe) >= 9
+    def test_recovers_exactly_the_transaction_rows(self, scanned_result):
+        """The same ten rows the digital fixture yields — no letterhead, no
+        footer, nothing invented. Text outside the ruled table must be dropped
+        rather than becoming junk rows in the middle of a ledger."""
+        assert len(scanned_result.dataframe) == 10
 
     def test_recovers_the_closing_balance(self, scanned_result):
         frame = scanned_result.dataframe
@@ -200,6 +203,18 @@ class TestScannedRoundTrip:
 
         closing = frame[numeric[-1]].dropna()
         assert closing.iloc[-1] == pytest.approx(16610.90, abs=0.01)
+
+    def test_the_figures_reconcile(self, scanned_result):
+        """The strongest possible statement about the scanned path: the numbers
+        read off a JPEG add up to the totals printed in the same JPEG."""
+        report = scanned_result.report
+        assert report.passed, report.summary()
+
+        totals = next((c for c in report.checks if c.id == "stated_totals"), None)
+        assert totals is not None and totals.passed
+
+        balance = next((c for c in report.checks if c.id == "running_balance"), None)
+        assert balance is not None and balance.passed
 
     def test_the_report_records_that_it_came_from_a_scan(self, scanned_result):
         assert scanned_result.meta.n_scanned == 2

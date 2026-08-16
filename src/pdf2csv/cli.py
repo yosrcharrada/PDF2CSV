@@ -180,11 +180,15 @@ def command_check(args: argparse.Namespace) -> int:
         print("    available        yes")
         for model in report["models"]:
             print(f"    model            {model['name']}  ({model['size_mb']} MB)")
-        print("    downloads needed no — the weights ship inside the package")
+        # ASCII only: a Windows console on a client machine may be running any
+        # codepage, and a mojibake diagnostic is a diagnostic nobody trusts.
+        print("    downloads needed no - the weights ship inside the package")
     else:
         print("    available        NO")
         print(f"    reason           {report['reason']}")
     print()
+
+    _report_isolation()
 
     print("  Folders")
     for label, path in (
@@ -211,6 +215,66 @@ def command_check(args: argparse.Namespace) -> int:
     print("  Everything needed to run is present.")
     print()
     return 0
+
+
+def _report_isolation() -> None:
+    """Report any import path that comes from outside this installation.
+
+    Worth its own section because it is the failure that reproduces on exactly
+    one desktop and nowhere else. The bundled runtime must enable ``import
+    site``, which also switches on the per-user site-packages folder; if the
+    machine has any Python 3.11 packages there, they can shadow the versions
+    that shipped in the bundle.
+    """
+    import site
+    import sysconfig
+
+    print("  Python isolation")
+
+    user_site_on = getattr(site, "ENABLE_USER_SITE", None)
+    print(f"    user site-packages {'ENABLED' if user_site_on else 'disabled'}")
+
+    import pdf2csv
+
+    # "Inside" means the interpreter's own tree, the standard library, or the
+    # directory the pdf2csv package was imported from. In the portable bundle
+    # those are two siblings — PDF2CSV\python and PDF2CSV\app — so comparing
+    # against the interpreter's folder alone reports the application's own code
+    # as foreign, which is exactly the false alarm that makes a diagnostic
+    # useless.
+    roots: list[Path] = []
+    for candidate in (
+        sys.prefix,
+        sys.base_prefix,
+        sysconfig.get_paths()["stdlib"],
+        str(Path(pdf2csv.__file__).resolve().parent.parent),
+    ):
+        try:
+            roots.append(Path(candidate).resolve())
+        except OSError:
+            continue
+
+    foreign = []
+    for entry in sys.path:
+        if not entry:
+            continue
+        try:
+            resolved = Path(entry).resolve()
+        except OSError:
+            continue
+        if any(root == resolved or root in resolved.parents for root in roots):
+            continue
+        foreign.append(str(resolved))
+
+    if foreign:
+        print("    WARNING: these import paths are outside this installation")
+        for entry in foreign:
+            print(f"      {entry}")
+        print("    Packages found there can override the ones that shipped here.")
+        print("    Start the tool with 'Start PDF2CSV.bat', which prevents this.")
+    else:
+        print("    import paths     all inside this installation")
+    print()
 
 
 def _importable(name: str) -> bool:

@@ -221,23 +221,31 @@ def group_rows(boxes: list[TextBox], y_rules: list[float] | None = None) -> list
 
     if y_rules and len(y_rules) >= 3:
         bands: list[list[TextBox]] = [[] for _ in range(len(y_rules) - 1)]
-        leftovers: list[TextBox] = []
+        outside = 0
+
         for box in boxes:
             centre = box.y_centre
-            placed = False
             for index in range(len(y_rules) - 1):
                 if y_rules[index] <= centre < y_rules[index + 1]:
                     bands[index].append(box)
-                    placed = True
                     break
-            if not placed:
-                leftovers.append(box)
-        rows = [sorted(band, key=lambda b: b.x0) for band in bands if band]
-        # Text above the first rule or below the last still belongs somewhere.
-        if leftovers:
-            rows.extend(_group_rows_by_position(leftovers))
-            rows.sort(key=lambda row: min(b.y_centre for b in row))
-        return rows
+            else:
+                # Text above the first rule or below the last one sits outside
+                # the table the document itself drew: a letterhead, an account
+                # line, a page footer. Keeping it produced junk rows in the
+                # middle of a ledger — rows that then get flagged as duplicates
+                # and quietly widen every column total.
+                #
+                # A ruled table's top border is drawn above its header, so the
+                # header is inside the band and survives. A format that rules
+                # only between data rows loses its header here and falls back to
+                # positional column names, which is visible and recoverable;
+                # fabricated transaction rows are neither.
+                outside += 1
+
+        if outside:
+            log.debug("dropped %d text box(es) outside the ruled table", outside)
+        return [sorted(band, key=lambda b: b.x0) for band in bands if band]
 
     return _group_rows_by_position(boxes)
 

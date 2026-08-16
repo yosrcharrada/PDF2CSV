@@ -51,9 +51,10 @@ notebooks/*.ipynb
 *.xlsx
 !tests/fixtures/expected/*.xlsx
 
-# --- OS / editor ---
+# --- OS / editor / local tooling ---
 Thumbs.db
 Desktop.ini
 .DS_Store
 .vscode/
 .idea/
+.claude/
