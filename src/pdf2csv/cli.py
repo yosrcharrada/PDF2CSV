@@ -1,0 +1,308 @@
+"""Command line entry point.
+
+Four subcommands, and ``ui`` is the default because that is what the analyst
+double-clicks. The others exist for the person supporting them:
+
+``convert``  batch or scripted use, and the fastest way to reproduce a bug
+``check``    an environment report to paste into an email when it will not start
+``cache``    clear the OCR cache when a document is reprocessed after a fix
+
+Argparse rather than click or typer: this has to run inside an embeddable
+Python distribution, and every dependency that is not strictly necessary is one
+more wheel that can fail to install on a locked-down desktop.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import socket
+import sys
+import threading
+import time
+import webbrowser
+from pathlib import Path
+
+from pdf2csv import __version__
+from pdf2csv.config import get_settings
+from pdf2csv.logging_setup import get_logger, setup_logging
+
+log = get_logger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# ui
+# --------------------------------------------------------------------------- #
+
+
+def find_free_port(preferred: int, host: str, attempts: int = 25) -> int:
+    """Return a bindable port, starting at ``preferred``.
+
+    Ports get taken. If the analyst left yesterday's window open, or some other
+    tool claimed 8730, the right behaviour is to move to 8731 and carry on —
+    not to fail with 'address already in use', which reads as broken software
+    to someone who does not know what a port is.
+    """
+    for offset in range(attempts):
+        candidate = preferred + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((host, candidate))
+            except OSError:
+                continue
+            return candidate
+    return preferred
+
+
+def command_ui(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    settings = get_settings()
+    settings.ensure_dirs()
+    setup_logging()
+
+    host = args.host or settings.host
+    port = find_free_port(args.port or settings.port, host)
+    url = f"http://{host}:{port}"
+
+    if port != (args.port or settings.port):
+        log.info("preferred port was busy; using %d", port)
+
+    print()
+    print("  PDF2CSV is running.")
+    print()
+    print(f"    Open this in your browser:  {url}")
+    print(f"    Finished files are saved to: {settings.output_dir}")
+    print()
+    print("  Leave this window open while you work. Close it to stop.")
+    print()
+
+    if settings.open_browser and not args.no_browser:
+        def _open() -> None:
+            # Give uvicorn a moment to bind, or the browser races it and shows
+            # a connection error the analyst then has to refresh past.
+            time.sleep(1.2)
+            # A desktop with no default browser configured must not take the
+            # server down with it; the URL is printed above either way.
+            with contextlib.suppress(Exception):
+                webbrowser.open(url)
+
+        threading.Thread(target=_open, daemon=True).start()
+
+    uvicorn.run(
+        "pdf2csv.server.app:app",
+        host=host,
+        port=port,
+        log_level="warning",
+        access_log=False,
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# convert
+# --------------------------------------------------------------------------- #
+
+
+def command_convert(args: argparse.Namespace) -> int:
+    from pdf2csv.core.export import export_result
+    from pdf2csv.core.pipeline import run
+
+    setup_logging(level="DEBUG" if args.verbose else None)
+
+    source = Path(args.pdf)
+    destination = Path(args.output) if args.output else source.with_suffix(".csv")
+
+    def show(stage: str, current: int, total: int, message: str) -> None:
+        if not args.quiet:
+            print(f"  {message}", flush=True)
+
+    try:
+        result = run(
+            source,
+            profile=args.profile,
+            progress=show,
+            enable_ocr=not args.no_ocr,
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"\n  {exc}\n", file=sys.stderr)
+        return 2
+
+    export_result(result, destination, write_xlsx=not args.no_xlsx)
+
+    # Non-zero when the numbers did not reconcile, so a scripted caller can
+    # act on it. The files are still written either way.
+    return 0 if result.report.passed else 1
+
+
+# --------------------------------------------------------------------------- #
+# check
+# --------------------------------------------------------------------------- #
+
+
+def command_check(args: argparse.Namespace) -> int:
+    """Print an environment report.
+
+    Written to be pasted into an email. When a client desktop will not run
+    this, the answer is almost always in these twenty lines, and asking a
+    non-technical user to investigate any other way does not work.
+    """
+    import platform
+
+    from pdf2csv.core import cache, ocr
+
+    settings = get_settings()
+
+    print()
+    print(f"  PDF2CSV {__version__}")
+    print("  " + "-" * 60)
+    print(f"  Python           {platform.python_version()}  ({sys.executable})")
+    print(f"  Platform         {platform.platform()}")
+    print()
+
+    print("  Dependencies")
+    for module in (
+        "pdfplumber", "pypdfium2", "pandas", "numpy", "fastapi",
+        "uvicorn", "openpyxl", "cv2", "onnxruntime", "rapidocr_onnxruntime",
+    ):
+        try:
+            imported = __import__(module)
+            version = getattr(imported, "__version__", "installed")
+            print(f"    {module:24s} {version}")
+        except ImportError:
+            print(f"    {module:24s} MISSING")
+    print()
+
+    print("  OCR (scanned pages)")
+    report = ocr.model_report()
+    if report["available"]:
+        print("    available        yes")
+        for model in report["models"]:
+            print(f"    model            {model['name']}  ({model['size_mb']} MB)")
+        print("    downloads needed no — the weights ship inside the package")
+    else:
+        print("    available        NO")
+        print(f"    reason           {report['reason']}")
+    print()
+
+    print("  Folders")
+    for label, path in (
+        ("home", settings.home),
+        ("output", settings.output_dir),
+        ("logs", settings.logs_dir),
+        ("cache", settings.cache_dir),
+    ):
+        writable = "writable" if _writable(path) else "NOT WRITABLE"
+        print(f"    {label:16s} {path}  [{writable}]")
+    print(f"    cache size       {cache.size_bytes() / 1e6:.1f} MB")
+    print()
+
+    problems = [
+        name for name in ("pdfplumber", "pypdfium2", "pandas", "fastapi") if not _importable(name)
+    ]
+    if problems:
+        print(f"  PROBLEM: missing required packages: {', '.join(problems)}")
+        return 1
+    if not _writable(settings.output_dir):
+        print("  PROBLEM: the output folder cannot be written to.")
+        return 1
+
+    print("  Everything needed to run is present.")
+    print()
+    return 0
+
+
+def _importable(name: str) -> bool:
+    try:
+        __import__(name)
+    except ImportError:
+        return False
+    return True
+
+
+def _writable(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".probe"
+        probe.write_text("x", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------- #
+# cache
+# --------------------------------------------------------------------------- #
+
+
+def command_cache(args: argparse.Namespace) -> int:
+    from pdf2csv.core import cache
+
+    if args.cache_action == "clear":
+        print(f"  Cleared {cache.clear() / 1e6:.1f} MB of cached OCR results.")
+    else:
+        print(f"  OCR cache: {cache.size_bytes() / 1e6:.1f} MB")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# Parser
+# --------------------------------------------------------------------------- #
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="pdf2csv",
+        description="Turn finance PDFs into validated CSV files.",
+    )
+    parser.add_argument("--version", action="version", version=f"pdf2csv {__version__}")
+    subcommands = parser.add_subparsers(dest="command")
+
+    ui = subcommands.add_parser("ui", help="start the web interface (default)")
+    ui.add_argument("--host", default=None)
+    ui.add_argument("--port", type=int, default=None)
+    ui.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    ui.set_defaults(func=command_ui)
+
+    convert = subcommands.add_parser("convert", help="convert one PDF from the command line")
+    convert.add_argument("pdf")
+    convert.add_argument("-o", "--output", help="destination CSV (default: alongside the PDF)")
+    convert.add_argument("-p", "--profile", help="document profile name")
+    convert.add_argument("--no-ocr", action="store_true", help="skip scanned pages")
+    convert.add_argument("--no-xlsx", action="store_true", help="do not write the workbook")
+    convert.add_argument("-q", "--quiet", action="store_true")
+    convert.add_argument("-v", "--verbose", action="store_true")
+    convert.set_defaults(func=command_convert)
+
+    check = subcommands.add_parser("check", help="print an environment report")
+    check.set_defaults(func=command_check)
+
+    cache_command = subcommands.add_parser("cache", help="inspect or clear the OCR cache")
+    cache_command.add_argument(
+        "cache_action", nargs="?", choices=["status", "clear"], default="status"
+    )
+    cache_command.set_defaults(func=command_cache)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if not getattr(args, "func", None):
+        # Bare `pdf2csv` starts the UI. The launcher batch file relies on this,
+        # and it is the only thing a non-technical user will ever run.
+        args = parser.parse_args([*(argv or []), "ui"])
+
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\n  Stopped.\n")
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

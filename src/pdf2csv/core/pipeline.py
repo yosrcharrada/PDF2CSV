@@ -31,6 +31,7 @@ from pdf2csv.models import (
     ValidationReport,
 )
 from pdf2csv.profiles import Profile, select_profile
+from pdf2csv.wording import count, listed, plural
 
 log = get_logger(__name__)
 
@@ -245,17 +246,20 @@ def _run_scanned(
     emit: ProgressFn,
 ) -> list[ExtractedTable]:
     """Run the OCR path, degrading to a clear message when it cannot run."""
-    page_list = ", ".join(str(i + 1) for i in scanned_indices)
+    page_list = listed([str(i + 1) for i in scanned_indices], limit=10)
+    pages_word = plural(len(scanned_indices), "Page", "Pages")
+    are_word = plural(len(scanned_indices), "is a scan", "are scans")
 
     if not enable_ocr:
-        meta.warnings.append(f"OCR was disabled; scanned page(s) {page_list} were skipped.")
+        meta.warnings.append(f"Reading of scanned {page_list} was turned off for this run.")
         report.add(
             "ocr_skipped",
             "Scanned pages were not read",
             False,
             severity=Severity.WARNING,
-            detail=f"Page(s) {page_list} are scans and OCR was turned off for this run.",
-            hint="Run again with OCR enabled to include these pages.",
+            detail=f"{pages_word} {page_list} {are_word}, and reading scans was "
+            "turned off for this run.",
+            hint="Run it again with scanned-page reading enabled to include them.",
         )
         return []
 
@@ -267,9 +271,9 @@ def _run_scanned(
             "Scanned pages could not be read",
             False,
             severity=Severity.ERROR,
-            detail=f"Page(s) {page_list} are scans. {reason}",
-            hint="Install the OCR add-on, or ask for a build that includes it. "
-            "Until then any figures on those pages are missing from this CSV.",
+            detail=f"{pages_word} {page_list} {are_word}. {reason}",
+            hint="Ask for a build that includes the scanned-document add-on. Until then, "
+            "any figures on those pages are missing from this CSV.",
         )
         return []
 
@@ -292,8 +296,9 @@ def _run_scanned(
             "Scanned pages could not be read",
             False,
             severity=Severity.ERROR,
-            detail=f"Page(s) {page_list} could not be processed: {exc}",
-            hint="The digital pages were still extracted. Check the log for details.",
+            detail=f"{pages_word} {page_list} could not be processed: {exc}",
+            hint="The rest of the document was still read. "
+            "The log file has the technical detail.",
         )
         return []
 
@@ -344,7 +349,7 @@ def _empty_result(
         "A table was found and rows were extracted",
         False,
         severity=Severity.ERROR,
-        detail=f"No table could be recognised in {meta.n_pages} page(s).",
+        detail=f"No table could be recognised in {count(meta.n_pages, 'page')}.",
         hint=(
             "See the scanned-pages message above."
             if already_flagged

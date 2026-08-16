@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>PDF to CSV</title>
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232f5fdd'/><path d='M9 8h9l5 5v11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='white'/><path d='M18 8v5h5' fill='%23c7d6f7'/></svg>">
+</head>
+<body>
+
+<!-- Icon definitions. Inline so the page needs nothing from the network. -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3v5h5M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4m0-4h.01"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><use href="#i-file"/></svg>
+    </span>
+    <span class="brand-text">
+      <strong>PDF&nbsp;to&nbsp;CSV</strong>
+      <small id="version"></small>
+    </span>
+  </div>
+
+  <div class="topbar-actions">
+    <button id="output-folder" class="ghost" type="button" hidden>
+      <svg aria-hidden="true"><use href="#i-folder"/></svg>
+      <span>Saved files</span>
+    </button>
+    <button id="theme-toggle" class="ghost icon-only" type="button"
+            aria-label="Switch between light and dark">
+      <svg class="show-light" aria-hidden="true"><use href="#i-moon"/></svg>
+      <svg class="show-dark" aria-hidden="true"><use href="#i-sun"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="banner-slot" aria-live="polite"></div>
+
+<main id="main">
+
+  <!-- ── Step 1: choose a file ─────────────────────────────────────────── -->
+  <section id="view-idle" class="view">
+    <form id="dropzone" class="dropzone" tabindex="0"
+          aria-label="Choose a PDF, or drop one here">
+      <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
+      <span class="dropzone-icon" aria-hidden="true">
+        <svg><use href="#i-upload"/></svg>
+      </span>
+      <h1>Drop a PDF here</h1>
+      <p class="dropzone-sub">or <span class="link">choose a file from your computer</span></p>
+      <p class="dropzone-note" id="dropzone-note">
+        Bank statements, ledgers and journals. Scanned documents work too.
+      </p>
+    </form>
+
+    <ol class="how">
+      <li><span class="how-n">1</span> Pick your PDF</li>
+      <li><span class="how-n">2</span> We read the tables and check the totals add up</li>
+      <li><span class="how-n">3</span> Download the spreadsheet</li>
+    </ol>
+  </section>
+
+  <!-- ── Step 2: working ───────────────────────────────────────────────── -->
+  <section id="view-working" class="view" hidden aria-live="polite">
+    <div class="card working">
+      <div class="working-head">
+        <svg class="spinner" viewBox="0 0 40 40" aria-hidden="true">
+          <circle class="spinner-track" cx="20" cy="20" r="16"/>
+          <circle class="spinner-head" cx="20" cy="20" r="16"/>
+        </svg>
+        <div>
+          <h2 id="working-filename">Reading your file</h2>
+          <p id="working-message" class="muted">Starting…</p>
+        </div>
+        <span id="working-elapsed" class="elapsed tabular">0s</span>
+      </div>
+
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow="0" id="working-bar-wrap">
+        <div class="bar-fill" id="working-bar"></div>
+      </div>
+
+      <p class="working-hint" id="working-hint"></p>
+    </div>
+  </section>
+
+  <!-- ── Step 3: the result ────────────────────────────────────────────── -->
+  <section id="view-result" class="view" hidden>
+
+    <div class="verdict" id="verdict">
+      <span class="verdict-icon" aria-hidden="true"><svg><use href="#i-check"/></svg></span>
+      <div class="verdict-text">
+        <h2 id="verdict-title">All checks passed</h2>
+        <p id="verdict-detail" class="muted"></p>
+      </div>
+      <div class="verdict-actions">
+        <button id="dl-csv" class="primary" type="button">
+          <svg aria-hidden="true"><use href="#i-download"/></svg>
+          <span>Download CSV</span>
+        </button>
+        <button id="dl-xlsx" class="secondary" type="button">Excel</button>
+        <button id="dl-json" class="secondary" type="button">Report</button>
+      </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="columns">
+      <section class="card checks-card">
+        <header class="card-head">
+          <h3>Checks</h3>
+          <span class="muted" id="checks-count"></span>
+        </header>
+        <ul class="checks" id="checks"></ul>
+      </section>
+
+      <section class="card preview-card">
+        <header class="card-head">
+          <h3>Your data</h3>
+          <span class="muted" id="preview-count"></span>
+        </header>
+        <div class="table-scroll" id="preview-scroll">
+          <table class="preview" id="preview"></table>
+        </div>
+        <footer class="preview-foot" id="preview-foot" hidden></footer>
+      </section>
+    </div>
+
+    <div class="again">
+      <button id="start-over" class="secondary" type="button">Convert another file</button>
+    </div>
+  </section>
+
+  <!-- ── Failure ───────────────────────────────────────────────────────── -->
+  <section id="view-failed" class="view" hidden>
+    <div class="card failure">
+      <span class="verdict-icon danger" aria-hidden="true"><svg><use href="#i-alert"/></svg></span>
+      <h2>That file could not be read</h2>
+      <p id="failure-detail" class="muted"></p>
+      <p class="muted small" id="failure-help">
+        If it opens normally in a PDF reader, send it to whoever supports this tool —
+        the layout may not be supported yet.
+      </p>
+      <button id="failed-retry" class="primary" type="button">Try another file</button>
+    </div>
+  </section>
+
+  <!-- ── Recent ────────────────────────────────────────────────────────── -->
+  <section class="history" id="history" hidden>
+    <h3>Recent</h3>
+    <ul id="history-list"></ul>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span>Runs entirely on this computer. Nothing is uploaded anywhere.</span>
+</footer>
+
+<div id="toasts" class="toasts" aria-live="assertive"></div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

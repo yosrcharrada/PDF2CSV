@@ -26,6 +26,7 @@ from pdf2csv.core.normalize import AMOUNT, NormalizedTable
 from pdf2csv.logging_setup import get_logger
 from pdf2csv.models import DocumentMeta, PageKind, Severity, ValidationReport
 from pdf2csv.profiles import Profile
+from pdf2csv.wording import count, listed, plural
 
 log = get_logger(__name__)
 
@@ -98,7 +99,7 @@ def check_table_found(table: NormalizedTable, report: ValidationReport, profile:
         "A table was found and rows were extracted",
         rows >= max(1, profile.min_rows),
         severity=Severity.ERROR,
-        detail=f"{rows} data row(s) extracted.",
+        detail=f"{count(rows, 'data row')} extracted.",
         hint=(
             ""
             if rows >= max(1, profile.min_rows)
@@ -132,9 +133,9 @@ def check_expected_columns(
 def check_numeric_parsing(table: NormalizedTable, report: ValidationReport) -> None:
     """Guide check 5 — no unreadable values left in numeric columns."""
     failures = [f for f in report.flags if f.reason == "could not be read as a number"]
-    listed = ", ".join(f"row {f.row + 1} {f.column} = {f.value!r}" for f in failures[:_MAX_LISTED])
-    if len(failures) > _MAX_LISTED:
-        listed += f", and {len(failures) - _MAX_LISTED} more"
+    where = listed(
+        [f"row {f.row + 1} {f.column} ({f.value})" for f in failures], limit=_MAX_LISTED
+    )
 
     report.add(
         "numeric_parsing",
@@ -142,14 +143,15 @@ def check_numeric_parsing(table: NormalizedTable, report: ValidationReport) -> N
         not failures,
         severity=Severity.ERROR,
         detail=(
-            "All numeric cells parsed cleanly."
+            "Every figure was read cleanly."
             if not failures
-            else f"{len(failures)} cell(s) could not be read: {listed}"
+            else f"{count(len(failures), 'cell')} could not be read: {where}"
         ),
         hint=(
             ""
             if not failures
-            else "These cells are blank in the CSV. Check them against the PDF before using it."
+            else f"{plural(len(failures), 'This cell is', 'These cells are')} blank in the "
+            "CSV. Check them against the PDF before using it."
         ),
     )
 
@@ -166,11 +168,11 @@ def check_ocr_confidence(
 
     detail_parts = []
     if low:
-        detail_parts.append(f"{len(low)} cell(s) recognised with low confidence")
+        detail_parts.append(f"{count(len(low), 'figure')} recognised with low confidence")
     if repaired:
-        detail_parts.append(f"{len(repaired)} cell(s) auto-corrected")
+        detail_parts.append(f"{count(len(repaired), 'cell')} corrected automatically")
     if not detail_parts:
-        detail_parts.append("All scanned figures were recognised confidently.")
+        detail_parts.append("Every scanned figure was recognised confidently")
 
     report.add(
         "ocr_confidence",
@@ -229,7 +231,7 @@ def check_stated_totals(table: NormalizedTable, report: ValidationReport) -> Non
         not mismatches,
         severity=Severity.ERROR,
         detail=(
-            f"Reconciled {len(table.stated_totals)} stated total(s)."
+            f"Reconciled {count(len(table.stated_totals), 'stated total')}."
             if not mismatches
             else "; ".join(mismatches)
         ),
@@ -302,9 +304,7 @@ def check_running_balance(
     assert best_breaks is not None
     checked = int(balance.notna().sum()) - 1
 
-    listed = ", ".join(f"row {r + 1}" for r in best_breaks[:_MAX_LISTED])
-    if len(best_breaks) > _MAX_LISTED:
-        listed += f", and {len(best_breaks) - _MAX_LISTED} more"
+    where = listed([f"row {r + 1}" for r in best_breaks], limit=_MAX_LISTED)
 
     for row in best_breaks:
         report.flag(
@@ -320,16 +320,17 @@ def check_running_balance(
         not best_breaks,
         severity=Severity.ERROR,
         detail=(
-            f"Checked {checked} consecutive row pair(s); all consistent"
+            f"Checked {count(checked, 'consecutive row pair')}; all consistent"
             + (" (debits increase the balance)." if best_sign == -1 else ".")
             if not best_breaks
-            else f"{len(best_breaks)} row(s) break the running balance: {listed}"
+            else f"{count(len(best_breaks), 'row')} "
+            f"{plural(len(best_breaks), 'breaks', 'break')} the running balance: {where}"
         ),
         hint=(
             ""
             if not best_breaks
             else "A break usually means a row was missed, duplicated, or its amount misread. "
-            "Compare those rows against the PDF."
+            f"Compare {plural(len(best_breaks), 'that row', 'those rows')} against the PDF."
         ),
     )
 
@@ -419,16 +420,18 @@ def check_pages_contributed(
         not missing,
         severity=Severity.WARNING,
         detail=(
-            f"Rows came from page(s) {', '.join(map(str, sorted(contributed)))}."
+            f"Rows came from {plural(len(contributed), 'page', 'pages')} "
+            f"{listed([str(p) for p in sorted(contributed)], limit=8)}."
             if not missing
-            else f"Page(s) {', '.join(map(str, missing))} sit inside the table "
-            "but produced no rows."
+            else f"{plural(len(missing), 'Page', 'Pages')} "
+            f"{listed([str(p) for p in missing], limit=8)} "
+            f"{plural(len(missing), 'sits', 'sit')} inside the table but produced no rows."
         ),
         hint=(
             ""
             if not missing
-            else "Those pages may use a different layout, or their rows may have been "
-            "mistaken for repeated headers."
+            else f"{plural(len(missing), 'That page', 'Those pages')} may use a different "
+            "layout, or the rows may have been mistaken for repeated headers."
         ),
     )
 
@@ -439,8 +442,8 @@ def check_duplicate_rows(table: NormalizedTable, report: ValidationReport) -> No
     if frame.empty:
         return
     duplicated = frame.duplicated(keep="first")
-    count = int(duplicated.sum())
-    if count:
+    duplicates = int(duplicated.sum())
+    if duplicates:
         for row in frame.index[duplicated][:_MAX_LISTED]:
             report.flag(
                 int(row),
@@ -452,16 +455,18 @@ def check_duplicate_rows(table: NormalizedTable, report: ValidationReport) -> No
     report.add(
         "duplicate_rows",
         "No repeated rows that might be double-counted",
-        count == 0,
+        duplicates == 0,
         severity=Severity.WARNING,
         detail=(
             "No duplicate rows."
-            if count == 0
-            else f"{count} row(s) are exact duplicates of an earlier row."
+            if duplicates == 0
+            else f"{count(duplicates, 'row')} "
+            f"{plural(duplicates, 'is an exact duplicate', 'are exact duplicates')} "
+            "of an earlier row."
         ),
         hint=(
             ""
-            if count == 0
+            if duplicates == 0
             else "Two identical transactions on the same day are legitimate. "
             "A whole repeated block means a page was read twice."
         ),
@@ -473,15 +478,17 @@ def note_extraction_summary(
 ) -> None:
     """Not a test — the audit trail, recorded as a check so it lands in the sidecar."""
     parts = [
-        f"{len(table.frame)} rows",
-        f"{len(table.columns)} columns",
-        f"{meta.n_digital} digital page(s)",
-        f"{meta.n_scanned} scanned page(s)",
+        count(len(table.frame), "row"),
+        count(len(table.columns), "column"),
+        f"{count(meta.n_digital, 'digital page')}",
+        f"{count(meta.n_scanned, 'scanned page')}",
     ]
     if table.total_row_count:
-        parts.append(f"{table.total_row_count} totals row(s) held back for reconciliation")
+        parts.append(
+            f"{count(table.total_row_count, 'totals row')} held back for reconciliation"
+        )
     if table.repaired_cells:
-        parts.append(f"{table.repaired_cells} OCR cell(s) auto-corrected")
+        parts.append(f"{count(table.repaired_cells, 'scanned cell')} corrected automatically")
 
     report.add(
         "extraction_summary",

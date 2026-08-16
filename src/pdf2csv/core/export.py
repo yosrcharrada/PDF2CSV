@@ -21,6 +21,7 @@ import pandas as pd
 
 from pdf2csv.logging_setup import get_logger
 from pdf2csv.models import ExtractionResult, Severity
+from pdf2csv.wording import count
 
 log = get_logger(__name__)
 
@@ -103,11 +104,14 @@ def _announce(result: ExtractionResult, paths: ExportPaths) -> None:
     warned = [c for c in report.failed_checks if c.severity is Severity.WARNING]
 
     if failed:
-        print(f"\n  {len(failed)} check(s) FAILED — review before using this file:")
+        print(
+            f"\n  {count(len(failed), 'check')} did not pass "
+            "— review this before using the file:"
+        )
         for check in failed:
             print(f"    - {check.title}: {check.detail}")
     if warned:
-        print(f"\n  {len(warned)} warning(s):")
+        print(f"\n  {count(len(warned), 'warning')}:")
         for check in warned:
             print(f"    - {check.title}: {check.detail}")
     if not failed and not warned:
