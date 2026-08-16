@@ -70,10 +70,23 @@ development checkout.
 
 ```bash
 python -m venv .venv && .venv\Scripts\activate
-pip install -e ".[ocr,dev]"
-python tests/fixtures/make_fixtures.py
+
+pip install -e ".[dev]"
+
+# Scanned-document support, in two steps — see below for why.
+pip install -r requirements-ocr.txt
+pip install --no-deps -r requirements-ocr-nodeps.txt
+
+python -m pdf2csv check     # confirms cv2 reports 4.x, not 5.x
 pytest
 ```
+
+> **Why two steps for OCR.** `rapidocr-onnxruntime` declares a hard dependency
+> on `opencv-python` — the GUI build. It and `opencv-python-headless` own the
+> same `cv2` module, so a plain `pip install ".[ocr]"` installs both and
+> whichever lands last wins, dragging a Qt stack onto a machine that is meant
+> to be minimal. Installing it with `--no-deps` keeps the headless build.
+> `pdf2csv check` reports which one you ended up with.
 
 Run the interface:
 

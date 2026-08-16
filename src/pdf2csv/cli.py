@@ -237,17 +237,26 @@ def _report_isolation() -> None:
     import pdf2csv
 
     # "Inside" means the interpreter's own tree, the standard library, or the
-    # directory the pdf2csv package was imported from. In the portable bundle
+    # installation the pdf2csv package was imported from. In the portable bundle
     # those are two siblings — PDF2CSV\python and PDF2CSV\app — so comparing
     # against the interpreter's folder alone reports the application's own code
     # as foreign, which is exactly the false alarm that makes a diagnostic
     # useless.
+    #
+    # The grandparent is included for the same reason: `python -m pdf2csv` puts
+    # the working directory on sys.path, which in a development checkout is the
+    # repository root above src/, and in the bundle is the bundle root above
+    # app/. Both are the installation. Without this the check warns on every
+    # ordinary development run, and a warning that fires when nothing is wrong
+    # is one nobody reads when something is.
+    package_dir = Path(pdf2csv.__file__).resolve().parent
     roots: list[Path] = []
     for candidate in (
         sys.prefix,
         sys.base_prefix,
         sysconfig.get_paths()["stdlib"],
-        str(Path(pdf2csv.__file__).resolve().parent.parent),
+        str(package_dir.parent),
+        str(package_dir.parent.parent),
     ):
         try:
             roots.append(Path(candidate).resolve())

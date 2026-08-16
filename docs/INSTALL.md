@@ -116,6 +116,43 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
+### 2.0 Two Windows traps worth knowing before you start
+
+**Put the virtual environment outside a synced folder.** With the OCR extra a
+venv is roughly 400 MB across tens of thousands of small files. Inside OneDrive,
+Dropbox or Google Drive, that is uploaded, indexed and re-scanned continuously,
+which is slow, eats the quota, and occasionally locks a file mid-install. If the
+checkout has to live in a synced folder, put the venv somewhere else:
+
+```powershell
+C:\Users\<you>\AppData\Local\Programs\Python\Python311\python.exe -m venv C:\venvs\pdf2csv
+C:\venvs\pdf2csv\Scripts\activate
+```
+
+**Watch the total path length.** Windows caps paths at 260 characters unless
+long-path support is enabled, and `onnxruntime` ships genuinely long ones —
+`...\site-packages\onnxruntime\tools\ort_format_model\ort_flatbuffers_py\fbs\
+RuntimeOptimizationRecordContainerEntry.py` is 100 characters on its own. Install
+into a deeply nested folder and pip fails part-way through with `OSError: [Errno
+2] No such file or directory` and a hint about long paths. A short venv path such
+as `C:\venvs\pdf2csv` avoids it entirely; alternatively enable long paths:
+
+```powershell
+# Administrator PowerShell, then reboot
+New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+  -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
+```
+
+**Check which Python you are actually using.** If another project's venv is on
+your PATH, `pip install` silently installs into *that* project:
+
+```powershell
+python -c "import sys; print(sys.prefix)"
+```
+
+If that prints anything other than the venv you just made, activate yours first,
+or call its interpreter by full path.
+
 ### 2.1 Adding scanned-document support
 
 `rapidocr-onnxruntime` declares a hard dependency on `opencv-python` — the GUI
