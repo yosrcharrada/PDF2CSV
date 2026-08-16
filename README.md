@@ -71,7 +71,11 @@ development checkout.
 Follow these in order. Every command below has been run on a clean machine from
 a fresh clone.
 
-### Step 0 — Check you have Python 3.10 or newer
+### Step 0 — Check your Python version
+
+**Supported: Python 3.10, 3.11 or 3.12.** Not 3.13 or newer — several compiled
+dependencies have not been verified there yet, so the install deliberately
+refuses rather than half-working.
 
 Open a terminal and run:
 
@@ -79,13 +83,23 @@ Open a terminal and run:
 python --version
 ```
 
-If it prints `Python 3.10` or higher, skip to Step 1.
+| What it prints | What to do |
+|---|---|
+| `Python 3.10`, `3.11` or `3.12` | You're set — go to Step 1. |
+| `Python 3.13` or newer | Install 3.12 **alongside** it (see below). You do not need to remove the newer one. |
+| `Python 3.9` or older | Install 3.12 (see below). |
+| `'python' is not recognized` | Python isn't installed, or isn't on PATH (see below). |
 
-If it says *"not recognized"* or shows an older version, install Python from
-**<https://www.python.org/downloads/>**. On Windows, **tick "Add python.exe to
-PATH"** on the first screen of the installer — almost every "it doesn't work"
-report traces back to that box being left unticked. Close and reopen your
-terminal afterwards.
+**Installing Python 3.12:** go to **<https://www.python.org/downloads/>**,
+scroll to *"Looking for a specific release?"*, and pick the newest **3.12.x**.
+
+On Windows, **tick "Add python.exe to PATH"** on the installer's first screen.
+Almost every "it doesn't work" report traces back to that one box. Close and
+reopen your terminal afterwards.
+
+> If you install 3.12 next to a newer Python, `setup.bat` finds and uses 3.12
+> automatically. Doing it manually, use `py -3.12` in place of `python` in
+> Step 2a.
 
 ### Step 1 — Get the code
 
@@ -234,7 +248,10 @@ powershell -ExecutionPolicy Bypass -File packaging\build_portable.ps1 -Zip
 
 | Symptom | Cause and fix |
 |---|---|
+| `ERROR: Package 'pdf2csv' requires a different Python: 3.13.x not in '<3.13,>=3.10'` | Your Python is too new. Install 3.12 alongside it (Step 0) and create the environment with `py -3.12 -m venv .venv`. Nothing needs uninstalling. |
 | `'python' is not recognized` | Python is not on PATH. Reinstall and tick *"Add python.exe to PATH"*, then reopen the terminal. |
+| `error: externally-managed-environment` (Linux) | You skipped the virtual environment. Do Step 2a and 2b first. |
+| `No module named venv` (Debian/Ubuntu) | `sudo apt install python3-venv`, then repeat Step 2a. |
 | Prompt has no `(.venv)` after activating | You used the wrong activate command for your terminal — see the table in Step 2b. |
 | PowerShell: *"running scripts is disabled"* | Run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`, then activate again. No admin needed. |
 | `cd "path"; command` fails in Command Prompt | `;` is PowerShell syntax. In `cmd.exe` use `&&`, and `cd /d` to switch drive. |
