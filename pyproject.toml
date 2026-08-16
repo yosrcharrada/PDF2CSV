@@ -1,0 +1,102 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf2csv"
+version = "0.1.0"
+description = "Turn finance PDFs into validated CSV files, offline, on a locked-down Windows desktop."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Mohamed Yosr Charrada", email = "yosr.charrada@esprit.tn" }]
+keywords = ["pdf", "csv", "finance", "table-extraction", "ocr", "reconciliation"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+
+# Kept deliberately in sync with requirements.txt. requirements.txt is the file
+# the packaging script reads; this list exists so `pip install .` works too.
+dependencies = [
+    "pdfplumber>=0.11.4,<0.12",
+    "pypdfium2>=4.30,<5",
+    "pandas>=2.2,<3",
+    "numpy>=1.26,<3",
+    "openpyxl>=3.1,<4",
+    "PyYAML>=6.0,<7",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+    "python-multipart>=0.0.18",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "rapidocr-onnxruntime>=1.4,<2",
+    "onnxruntime>=1.19,<2",
+    "opencv-python-headless>=4.10,<5",
+    "Pillow>=10.0,<12",
+]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-cov>=6.0,<8",
+    "ruff>=0.8,<1",
+    "pip-licenses>=5.0,<6",
+    "httpx>=0.27,<1",
+]
+
+[project.scripts]
+pdf2csv = "pdf2csv.cli:main"
+
+[project.urls]
+Documentation = "https://github.com/charradamohamed/pdf2csv/tree/main/docs"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pdf2csv = ["server/static/*", "server/static/**/*", "profiles/*.yaml"]
+
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "ocr: requires the OCR extra (rapidocr-onnxruntime, opencv). Skipped when absent.",
+    "slow: takes more than a couple of seconds.",
+]
+filterwarnings = ["ignore::DeprecationWarning:pdfminer.*"]
+
+# -----------------------------------------------------------------------------
+# Lint / format
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RET", "PTH", "RUF"]
+ignore = [
+    "B008",   # FastAPI's Depends()/File() defaults are the documented idiom
+    "SIM108", # ternaries are not always clearer than an if/else
+    # Ambiguous unicode is this project's subject matter, not a mistake in it.
+    # The parser exists to cope with non-breaking spaces, unicode minus signs,
+    # en dashes used as minus, and accented column headers; it cannot do that
+    # without naming those characters in string literals.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"

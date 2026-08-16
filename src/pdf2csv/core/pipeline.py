@@ -1,0 +1,358 @@
+"""The one public entry point: :func:`run`.
+
+The notebook calls it. The web UI calls it. The CLI calls it. The tests call
+it. Nothing else in this project is allowed to contain extraction logic, which
+is what makes "prototype here, deploy there" a non-event rather than a rewrite.
+
+:func:`run` never raises for a document it merely dislikes. A PDF with no
+tables, a scan on a machine without the OCR add-on, a page that fails to
+parse — each produces a result carrying a failed check that says so in plain
+words. It raises only when it cannot read the file at all, because that is the
+one case where there is nothing useful to report.
+"""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+import pandas as pd
+
+from pdf2csv.config import get_settings
+from pdf2csv.core import cache, digital, normalize, ocr, router, scanned, stitch, validate
+from pdf2csv.logging_setup import get_logger
+from pdf2csv.models import (
+    DocumentMeta,
+    ExtractedTable,
+    ExtractionResult,
+    PageKind,
+    Severity,
+    ValidationReport,
+)
+from pdf2csv.profiles import Profile, select_profile
+
+log = get_logger(__name__)
+
+ProgressFn = Callable[[str, int, int, str], None]
+"""``progress(stage, current, total, message)`` — drives the UI's progress bar.
+
+Called often enough to feel live and cheaply enough to ignore. A callback that
+raises is a bug in the caller, so exceptions are deliberately not swallowed.
+"""
+
+
+def _noop_progress(stage: str, current: int, total: int, message: str) -> None:
+    return None
+
+
+def run(
+    pdf_path: str | Path,
+    *,
+    profile: str | Profile | None = None,
+    progress: ProgressFn | None = None,
+    enable_ocr: bool = True,
+) -> ExtractionResult:
+    """Extract, normalise and validate the tables in one PDF.
+
+    Args:
+        pdf_path: The document to read.
+        profile: A profile name, a :class:`Profile`, or ``None`` to auto-detect.
+        progress: Optional ``(stage, current, total, message)`` callback.
+        enable_ocr: Set ``False`` to skip scanned pages entirely — useful when
+            a caller knows the document is digital and wants a guaranteed-fast
+            result.
+
+    Returns:
+        An :class:`ExtractionResult` carrying the dataframe, the validation
+        report and the document metadata.
+
+    Raises:
+        FileNotFoundError: The path does not exist.
+        ValueError: The file is not a readable PDF.
+    """
+    import pdfplumber
+
+    emit = progress or _noop_progress
+    settings = get_settings()
+    started = time.perf_counter()
+
+    path = Path(pdf_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"No such file: {path}")
+
+    report = ValidationReport()
+    meta = DocumentMeta(
+        source_path=str(path),
+        source_name=path.name,
+        size_bytes=path.stat().st_size,
+        ocr_available=ocr.is_available(),
+    )
+
+    emit("reading", 0, 1, f"Opening {path.name}")
+    meta.sha256 = cache.file_sha256(path)
+
+    try:
+        pdf = pdfplumber.open(str(path))
+    except Exception as exc:
+        raise ValueError(f"{path.name} could not be opened as a PDF: {exc}") from exc
+
+    try:
+        meta.n_pages = len(pdf.pages)
+        if meta.n_pages == 0:
+            raise ValueError(f"{path.name} contains no pages.")
+        if meta.n_pages > settings.max_pages:
+            meta.warnings.append(
+                f"Document has {meta.n_pages} pages; only the first "
+                f"{settings.max_pages} were processed."
+            )
+
+        page_limit = min(meta.n_pages, settings.max_pages)
+
+        # --- Route ----------------------------------------------------------
+        emit("routing", 0, page_limit, "Deciding which pages need OCR")
+        meta.page_kinds = router.classify_document(pdf, min_chars=settings.min_text_chars)[
+            :page_limit
+        ]
+
+        resolved_profile = _resolve_profile(pdf, profile, page_limit)
+        meta.profile = resolved_profile.name
+
+        # --- Digital pages ---------------------------------------------------
+        tables: list[ExtractedTable] = []
+        digital_indices = [
+            i for i, kind in enumerate(meta.page_kinds) if kind is PageKind.DIGITAL
+        ]
+
+        if digital_indices:
+
+            def digital_progress(current: int, total: int, message: str) -> None:
+                emit("digital", current, total, message)
+
+            found = digital.extract_digital_tables(
+                pdf,
+                digital_indices,
+                ragged_tolerance=settings.ragged_tolerance,
+                progress=digital_progress,
+            )
+            tables.extend(found)
+
+            # A page with an image and no extractable table is the signature of
+            # a scan carrying a bad text layer from some earlier tool. Reroute
+            # those, and only those, through OCR.
+            produced = {t.page_number for t in found}
+            for page_index in digital_indices:
+                if router.needs_ocr_fallback(
+                    pdf.pages[page_index], page_index + 1 in produced
+                ):
+                    log.info(
+                        "page %d: text layer yielded no table, rerouting to OCR",
+                        page_index + 1,
+                    )
+                    meta.page_kinds[page_index] = PageKind.SCANNED
+
+        # --- Scanned pages ----------------------------------------------------
+        scanned_indices = [
+            i for i, kind in enumerate(meta.page_kinds) if kind is PageKind.SCANNED
+        ]
+        if scanned_indices:
+            tables.extend(
+                _run_scanned(
+                    path,
+                    scanned_indices,
+                    meta=meta,
+                    report=report,
+                    settings=settings,
+                    enable_ocr=enable_ocr,
+                    emit=emit,
+                )
+            )
+    finally:
+        pdf.close()
+
+    tables.sort(key=lambda t: t.page_number)
+
+    # --- Assemble ------------------------------------------------------------
+    emit("assembling", 0, 1, "Joining pages together")
+    stitched = stitch.stitch(tables)
+    primary = stitch.pick_primary(stitched)
+
+    if primary is None:
+        meta.duration_seconds = time.perf_counter() - started
+        return _empty_result(report, meta, tables, resolved_profile)
+
+    normalised = normalize.normalize_table(
+        primary,
+        report,
+        profile=resolved_profile,
+        low_confidence=settings.low_confidence,
+    )
+
+    # --- Validate ------------------------------------------------------------
+    emit("validating", 0, 1, "Checking the numbers reconcile")
+    validate.run_all(normalised, report, meta, resolved_profile)
+
+    extras = _normalise_extras(stitched, primary, resolved_profile, settings)
+
+    meta.duration_seconds = time.perf_counter() - started
+    emit("done", 1, 1, report.summary())
+    log.info(
+        "extracted %d rows x %d columns from %s in %.1fs — %s",
+        len(normalised.frame),
+        len(normalised.frame.columns),
+        path.name,
+        meta.duration_seconds,
+        report.summary(),
+    )
+
+    return ExtractionResult(
+        dataframe=normalised.frame,
+        report=report,
+        meta=meta,
+        tables=tables,
+        extra_frames=extras,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+
+
+def _resolve_profile(pdf, profile: str | Profile | None, page_limit: int) -> Profile:
+    """Pick the document profile, reading the opening pages if auto-detecting."""
+    if isinstance(profile, Profile):
+        return profile
+
+    sample = ""
+    try:
+        for page in pdf.pages[: min(2, page_limit)]:
+            sample += (page.extract_text() or "") + "\n"
+    except Exception:
+        sample = ""
+
+    return select_profile(sample, requested=profile)
+
+
+def _run_scanned(
+    path: Path,
+    scanned_indices: list[int],
+    *,
+    meta: DocumentMeta,
+    report: ValidationReport,
+    settings,
+    enable_ocr: bool,
+    emit: ProgressFn,
+) -> list[ExtractedTable]:
+    """Run the OCR path, degrading to a clear message when it cannot run."""
+    page_list = ", ".join(str(i + 1) for i in scanned_indices)
+
+    if not enable_ocr:
+        meta.warnings.append(f"OCR was disabled; scanned page(s) {page_list} were skipped.")
+        report.add(
+            "ocr_skipped",
+            "Scanned pages were not read",
+            False,
+            severity=Severity.WARNING,
+            detail=f"Page(s) {page_list} are scans and OCR was turned off for this run.",
+            hint="Run again with OCR enabled to include these pages.",
+        )
+        return []
+
+    reason = ocr.unavailable_reason()
+    if reason:
+        meta.warnings.append(reason)
+        report.add(
+            "ocr_unavailable",
+            "Scanned pages could not be read",
+            False,
+            severity=Severity.ERROR,
+            detail=f"Page(s) {page_list} are scans. {reason}",
+            hint="Install the OCR add-on, or ask for a build that includes it. "
+            "Until then any figures on those pages are missing from this CSV.",
+        )
+        return []
+
+    def relay(current: int, total: int, message: str) -> None:
+        emit("ocr", current, total, message)
+
+    try:
+        return scanned.extract_scanned_tables(
+            str(path),
+            scanned_indices,
+            dpi=settings.ocr_dpi,
+            sha256=meta.sha256,
+            progress=relay,
+        )
+    except Exception as exc:  # a broken scan must not lose the digital pages
+        log.exception("OCR failed for %s", path.name)
+        meta.warnings.append(f"OCR failed: {exc}")
+        report.add(
+            "ocr_failed",
+            "Scanned pages could not be read",
+            False,
+            severity=Severity.ERROR,
+            detail=f"Page(s) {page_list} could not be processed: {exc}",
+            hint="The digital pages were still extracted. Check the log for details.",
+        )
+        return []
+
+
+def _normalise_extras(
+    stitched: list[stitch.StitchedTable],
+    primary: stitch.StitchedTable,
+    profile: Profile,
+    settings,
+) -> list[pd.DataFrame]:
+    """Type the secondary tables too, but do not validate them.
+
+    They are offered as a convenience; running the reconciliation checks against
+    a fee schedule would fill the report with failures that mean nothing.
+    """
+    extras: list[pd.DataFrame] = []
+    for table in stitched:
+        if table is primary:
+            continue
+        try:
+            throwaway = ValidationReport()
+            extras.append(
+                normalize.normalize_table(
+                    table,
+                    throwaway,
+                    profile=profile,
+                    low_confidence=settings.low_confidence,
+                ).frame
+            )
+        except Exception:
+            log.debug("secondary table on page(s) %s could not be typed", table.pages)
+    return extras
+
+
+def _empty_result(
+    report: ValidationReport,
+    meta: DocumentMeta,
+    tables: list[ExtractedTable],
+    profile: Profile,
+) -> ExtractionResult:
+    """A valid result that reports finding nothing, rather than an exception."""
+    already_flagged = any(
+        c.id in {"ocr_unavailable", "ocr_failed", "ocr_skipped"} and not c.passed
+        for c in report.checks
+    )
+    report.add(
+        "table_found",
+        "A table was found and rows were extracted",
+        False,
+        severity=Severity.ERROR,
+        detail=f"No table could be recognised in {meta.n_pages} page(s).",
+        hint=(
+            "See the scanned-pages message above."
+            if already_flagged
+            else "If you can see a table in the PDF, this layout is not yet supported. "
+            "Send the file to whoever maintains this tool."
+        ),
+    )
+    log.warning("no tables found in %s", meta.source_name)
+    return ExtractionResult(
+        dataframe=pd.DataFrame(), report=report, meta=meta, tables=tables
+    )

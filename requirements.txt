@@ -1,0 +1,23 @@
+# Runtime dependencies for PDF2CSV.
+#
+# Ranges, not exact pins. The exact set that ships to a client is frozen into
+# requirements.lock.txt by packaging/build_portable.ps1, which resolves this
+# file inside a clean venv on a Windows machine. Never hand-edit the lock file.
+#
+# Licence constraint: everything here must be MIT / BSD / Apache-2.0.
+# No AGPL or GPL may enter the shipped set. See docs/LICENSING.md.
+
+# --- PDF reading -------------------------------------------------------------
+pdfplumber>=0.11.4,<0.12        # MIT   — digital text + table extraction
+pypdfium2>=4.30,<5              # BSD-3 — rasterising, pure wheel, no Poppler
+
+# --- Data --------------------------------------------------------------------
+pandas>=2.2,<3                  # BSD-3
+numpy>=1.26,<3                  # BSD-3
+openpyxl>=3.1,<4                # MIT   — .xlsx export
+PyYAML>=6.0,<7                  # MIT   — document profiles
+
+# --- Web UI ------------------------------------------------------------------
+fastapi>=0.115,<1               # MIT
+uvicorn>=0.32,<1                # BSD-3 — bundled ASGI server, binds localhost
+python-multipart>=0.0.18        # Apache-2.0 — multipart upload parsing

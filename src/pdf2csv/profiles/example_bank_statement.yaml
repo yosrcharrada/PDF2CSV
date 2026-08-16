@@ -1,0 +1,76 @@
+# Example document profile.
+#
+# Copy this file, rename it, and edit it when you add support for a new bank or
+# statement format. The filename (minus .yaml) is the profile name unless you
+# set `name` explicitly.
+#
+# Delete this example before delivery, or keep it as the template for the next
+# format — but do not leave it enabled against a real document set, because its
+# match_keywords are deliberately unlikely to fire.
+
+name: example_bank_statement
+description: >
+  Worked example showing every available key. Matches nothing real: the keyword
+  list is placeholder text so this profile never activates by accident.
+
+# All of these phrases must appear in the document's first pages for the
+# profile to be selected. Keep them distinctive — a bank's legal name and a
+# phrase from its statement footer work well.
+match_keywords:
+  - "EXAMPLE BANK OF NOWHERE"
+  - "statement of account"
+
+# --- Parsing -----------------------------------------------------------------
+
+# "." or "," — omit to infer from the document's own amounts.
+decimal_separator: ","
+
+# true  => 04/03/2025 is 4 March   (most of the world)
+# false => 04/03/2025 is 3 April   (United States)
+# omit  => infer from the document
+dayfirst: true
+
+# Forward-fill blank label cells left behind by merged cells.
+# Read the warning in profiles/__init__.py before switching this on.
+fill_merged_labels: false
+
+# Regex patterns (matched case-insensitively against the column header).
+# Columns matching these stay TEXT even when every value looks numeric —
+# this is what stops an account number becoming 1.23457E+15 in Excel.
+identifier_columns:
+  - '\b(account|iban)\b'
+  - '\b(reference|ref|cheque)\s*(no|number)?\b'
+
+# Force a column's type when inference gets it wrong. Usually unnecessary.
+date_columns:
+  - '\b(date|value date|date de valeur)\b'
+amount_columns:
+  - '\b(debit|credit|balance|débit|crédit|solde)\b'
+
+# --- Validation --------------------------------------------------------------
+
+# Row labels that state a total the extracted rows must reconcile against.
+total_row_labels:
+  - total
+  - totals
+  - "total des mouvements"
+
+# Maps reconciliation roles to this format's actual column headers, enabling
+# the opening + credits - debits = closing continuity check.
+balance_columns:
+  opening: "Solde initial"
+  debit: "Débit"
+  credit: "Crédit"
+  closing: "Solde"
+
+# If set, a missing column is reported as a failed check rather than silently
+# producing a narrower CSV than the analyst expected.
+expected_columns:
+  - "Date"
+  - "Libellé"
+  - "Débit"
+  - "Crédit"
+  - "Solde"
+
+# Fewer rows than this means the table was not really found.
+min_rows: 1

@@ -1,0 +1,9 @@
+# Installed with --no-deps. See the header of requirements-ocr.txt for why.
+#
+#     pip install --no-deps -r requirements-ocr-nodeps.txt
+#
+# The ONNX weights (detection 4.7 MB, recognition 10.9 MB, orientation 0.6 MB)
+# ship inside this wheel. Nothing is downloaded at first run, so the OCR path is
+# offline-capable out of the box — no models/ pre-seeding step is required.
+
+rapidocr-onnxruntime>=1.4,<2      # Apache-2.0

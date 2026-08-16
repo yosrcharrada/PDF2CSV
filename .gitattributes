@@ -1,0 +1,49 @@
+# Line-ending and binary handling.
+#
+# This file is not optional housekeeping. The fixture PDFs are mostly ASCII —
+# uncompressed content streams and a plain-text cross-reference table — so
+# git's content heuristic classifies them as text and applies CRLF conversion
+# on checkout. That shifts every byte offset in the file, the xref table stops
+# pointing at the objects it names, and the fixtures become unreadable on the
+# next machine that clones the repo. Marking them binary is the fix.
+
+# Normalise text in the repository, check out native line endings.
+* text=auto
+
+# --- Binary: never convert -------------------------------------------------
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.onnx  binary
+*.xlsx  binary
+*.zip   binary
+*.woff  binary
+*.woff2 binary
+
+# --- Windows scripts need CRLF ---------------------------------------------
+# cmd.exe mis-parses a multi-line .bat with LF endings: a trailing token can be
+# swallowed and the launcher fails on the client's desktop with no useful
+# message. These launchers are the whole delivery mechanism, so pin them.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# --- Everything else is LF -------------------------------------------------
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.toml  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+*.cfg   text eol=lf
+
+# --- Diff / review ----------------------------------------------------------
+# Generated fixtures are reviewed by regenerating them, not by reading a diff.
+tests/fixtures/pdfs/*.pdf linguist-generated=true

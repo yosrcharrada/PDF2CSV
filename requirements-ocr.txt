@@ -1,0 +1,36 @@
+# OCR extras — needed only for scanned pages.
+#
+# Split out from requirements.txt because this is the heavy half of the install
+# (~130 MB of wheels, most of it onnxruntime). A deployment that only ever sees
+# digital PDFs can skip it; the app detects the absence and shows a clear
+# "scanned pages need the OCR add-on" message instead of crashing.
+#
+# ---------------------------------------------------------------------------
+# IMPORTANT — this file does NOT install rapidocr-onnxruntime itself.
+#
+# rapidocr-onnxruntime declares a hard dependency on `opencv-python`, the full
+# GUI build. Installing it normally silently overwrites opencv-python-headless
+# (both packages own the same `cv2` module), which drags the Qt/GTK GUI stack
+# onto a locked-down client desktop and roughly triples the OpenCV footprint.
+#
+# So rapidocr is installed separately with --no-deps, and the dependencies it
+# actually needs are declared here instead, with the headless OpenCV swapped in.
+# Verified working: RapidOCR uses only cv2 core routines, never imshow.
+#
+#     pip install -r requirements-ocr.txt
+#     pip install --no-deps -r requirements-ocr-nodeps.txt
+#
+# packaging/build_portable.ps1 does exactly this. If you install by hand, do
+# both lines or scanned pages will fail at import time.
+# ---------------------------------------------------------------------------
+
+-r requirements.txt
+
+# --- what rapidocr-onnxruntime needs, minus the GUI OpenCV ------------------
+onnxruntime>=1.19,<2              # MIT        — CPU inference engine
+opencv-python-headless>=4.10,<5   # Apache-2.0 — substituted for opencv-python
+Pillow>=10.0,<12                  # MIT-CMU
+pyclipper>=1.2.0                  # BSL-1.0    — polygon offsetting for det boxes
+shapely>=1.7.1,!=2.0.4            # BSD-3
+six>=1.15.0                       # MIT
+tqdm>=4.60                        # MPL-2.0 + MIT (file-level, not viral)

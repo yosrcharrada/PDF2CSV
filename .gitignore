@@ -1,0 +1,59 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# --- Project runtime output (never commit client data) ---
+/logs/
+/output/
+/.cache/
+/work/
+/uploads/
+*.validation.json
+
+# --- Portable bundle build artefacts (large, rebuildable) ---
+/build_portable/
+/wheels/
+/models/*
+!/models/README.md
+!/models/.gitkeep
+/vendor/
+
+# --- Notebooks ---
+.ipynb_checkpoints/
+notebooks/*.ipynb
+!notebooks/template.ipynb
+
+# --- Client PDFs: opt in explicitly, never by accident ---
+# Only the fixtures make_fixtures.py generates are whitelisted, by name. A
+# blanket "!tests/fixtures/pdfs/*.pdf" would sweep in any document that happens
+# to land in that folder — a cloud-sync drop, a file copied in for a quick
+# check — and committing a client statement is not a mistake you can undo.
+*.pdf
+!tests/fixtures/pdfs/statement_ruled_2page.pdf
+!tests/fixtures/pdfs/statement_borderless_fr.pdf
+!tests/fixtures/pdfs/statement_broken.pdf
+!tests/fixtures/pdfs/statement_scanned.pdf
+!tests/fixtures/pdfs/letter_no_table.pdf
+*.xlsx
+!tests/fixtures/expected/*.xlsx
+
+# --- OS / editor ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vscode/
+.idea/
