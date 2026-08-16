@@ -1,3 +1,17 @@
+# Everything needed to develop and test, EXCEPT rapidocr itself.
+#
+# rapidocr-onnxruntime is deliberately absent from this file. It must be
+# installed separately with --no-deps, or it drags in the GUI build of OpenCV
+# and overwrites opencv-python-headless -- see the header of requirements-ocr.txt.
+#
+# Full development install, in order:
+#
+#     pip install --upgrade pip setuptools wheel
+#     pip install -r requirements-dev.txt
+#     pip install --no-deps -r requirements-ocr-nodeps.txt
+#
+# Or on Windows, just double-click setup.bat, which does all of it.
+
 -r requirements.txt
 -r requirements-ocr.txt
 

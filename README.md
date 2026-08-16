@@ -66,51 +66,187 @@ development checkout.
 
 ---
 
-## Developer quick start
+## Setup — step by step
+
+Follow these in order. Every command below has been run on a clean machine from
+a fresh clone.
+
+### Step 0 — Check you have Python 3.10 or newer
+
+Open a terminal and run:
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate
+python --version
+```
 
+If it prints `Python 3.10` or higher, skip to Step 1.
+
+If it says *"not recognized"* or shows an older version, install Python from
+**<https://www.python.org/downloads/>**. On Windows, **tick "Add python.exe to
+PATH"** on the first screen of the installer — almost every "it doesn't work"
+report traces back to that box being left unticked. Close and reopen your
+terminal afterwards.
+
+### Step 1 — Get the code
+
+```bash
+git clone https://github.com/yosrcharrada/PDF2CSV.git
+```
+
+```bash
+cd PDF2CSV
+```
+
+No git? Download the ZIP from the GitHub page, extract it, and `cd` into the
+extracted folder.
+
+### Step 2 — Install
+
+> **Windows shortcut:** double-click **`setup.bat`** in the project folder. It
+> does Steps 2–4 for you — finds Python, creates the environment, installs
+> everything in the right order, and checks the result. Then skip to Step 5.
+
+Doing it manually, or on macOS / Linux:
+
+**2a. Create a virtual environment.** This keeps the project's packages out of
+your system Python and out of your other projects.
+
+```bash
+python -m venv .venv
+```
+
+**2b. Activate it.** Pick the line for your terminal:
+
+| Terminal | Command |
+|---|---|
+| Windows **Command Prompt** (`cmd.exe`) | `.venv\Scripts\activate.bat` |
+| Windows **PowerShell** | `.venv\Scripts\Activate.ps1` |
+| macOS / Linux | `source .venv/bin/activate` |
+
+Your prompt should now start with `(.venv)`. **If it doesn't, stop here** —
+everything after this installs into the wrong place. See
+[Troubleshooting](#troubleshooting).
+
+**2c. Install the application:**
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+```
+
+```bash
 pip install -e ".[dev]"
+```
 
-# Scanned-document support, in two steps — see below for why.
+### Step 3 — Add scanned-document support
+
+Skip this if you only ever convert PDFs that contain real text. Scanned pages
+will then report a clear message instead of being read.
+
+**This must be two commands. Do not combine them.**
+
+```bash
 pip install -r requirements-ocr.txt
+```
+
+```bash
 pip install --no-deps -r requirements-ocr-nodeps.txt
-
-python -m pdf2csv check     # confirms cv2 reports 4.x, not 5.x
-pytest
 ```
 
-> **Why two steps for OCR.** `rapidocr-onnxruntime` declares a hard dependency
-> on `opencv-python` — the GUI build. It and `opencv-python-headless` own the
-> same `cv2` module, so a plain `pip install ".[ocr]"` installs both and
-> whichever lands last wins, dragging a Qt stack onto a machine that is meant
-> to be minimal. Installing it with `--no-deps` keeps the headless build.
-> `pdf2csv check` reports which one you ended up with.
+> **Why two.** `rapidocr-onnxruntime` declares a hard dependency on
+> `opencv-python` — the desktop-GUI build. It and `opencv-python-headless` both
+> own the module named `cv2`, so a single `pip install ".[ocr]"` installs both
+> and whichever lands last wins. That drags a Qt/GTK stack onto a machine meant
+> to be minimal, and roughly triples the OpenCV footprint. `--no-deps` installs
+> rapidocr without letting it pull the GUI build, and `requirements-ocr.txt`
+> supplies what it genuinely needs.
 
-Run the interface:
-
-```bash
-python -m pdf2csv ui
-```
-
-Convert one file without the UI:
-
-```bash
-python -m pdf2csv convert statement.pdf -o statement.csv
-```
-
-Check an installation — the first thing to run when something is wrong:
+### Step 4 — Verify
 
 ```bash
 python -m pdf2csv check
 ```
 
-Build the portable Windows bundle for delivery:
+You are looking for four things:
+
+```
+cv2                      4.14.0        <- 4.x, NOT 5.x
+available        yes                   <- OCR is working
+import paths     all inside this installation
+Everything needed to run is present.
+```
+
+If `cv2` shows **5.x**, the GUI build won — see
+[Troubleshooting](#troubleshooting).
+
+### Step 5 — Run it
+
+```bash
+python -m pdf2csv ui
+```
+
+Your browser opens at **<http://127.0.0.1:8730>**. Drag a PDF onto the page.
+
+**Leave the terminal window open** — that is the program running. Press
+`Ctrl+C` there to stop it.
+
+> On Windows you can instead double-click **`run.bat`**.
+
+### Step 6 — Try it on the included samples
+
+From the running page, drag in either file from `tests/fixtures/pdfs/`:
+
+| File | What should happen |
+|---|---|
+| `statement_ruled_2page.pdf` | Green — *All checks passed*, 10 rows |
+| `statement_broken.pdf` | Red — one credit missing, **row 6 named** |
+
+The second is the one worth seeing. It is the same statement with a
+transaction removed from the body while the totals row still claims the full
+figures — exactly the failure this tool exists to catch.
+
+---
+
+## Other ways to run it
+
+Convert one file without the browser. Exit code is `1` when the numbers do not
+reconcile, so this is scriptable:
+
+```bash
+python -m pdf2csv convert statement.pdf -o statement.csv
+```
+
+Run the test suite (221 tests, about 10 seconds):
+
+```bash
+pytest
+```
+
+
+Build the portable Windows bundle for delivery to someone with no Python:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File packaging\build_portable.ps1 -Zip
 ```
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `'python' is not recognized` | Python is not on PATH. Reinstall and tick *"Add python.exe to PATH"*, then reopen the terminal. |
+| Prompt has no `(.venv)` after activating | You used the wrong activate command for your terminal — see the table in Step 2b. |
+| PowerShell: *"running scripts is disabled"* | Run `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`, then activate again. No admin needed. |
+| `cd "path"; command` fails in Command Prompt | `;` is PowerShell syntax. In `cmd.exe` use `&&`, and `cd /d` to switch drive. |
+| `pdf2csv check` shows `cv2 5.x` | The GUI OpenCV won. Run `pip uninstall -y opencv-python opencv-python-headless` then repeat Step 3. |
+| `pip check` says *"rapidocr-onnxruntime requires opencv-python"* | **Expected and correct.** We substituted the headless build deliberately. Not an error. |
+| Install fails with `OSError: [Errno 2] No such file or directory` on a long `onnxruntime` path | Windows 260-character path limit. Move the project somewhere shorter, such as `C:\dev\PDF2CSV`. |
+| Packages install but nothing imports | You installed outside the virtual environment. Check with `python -c "import sys; print(sys.prefix)"` — it must point at your `.venv`. |
+| Port 8730 already in use | Nothing to do; it moves to the next free port and prints the URL it chose. |
+| Scanned PDF says it cannot be read | Step 3 was skipped or failed. Re-run it, then `python -m pdf2csv check`. |
+
+Still stuck? `python -m pdf2csv check` prints a full environment report designed
+to be pasted into a bug report. It contains no document contents.
 
 ---
 
