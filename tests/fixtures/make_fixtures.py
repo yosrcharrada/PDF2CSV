@@ -209,7 +209,65 @@ def build_letter(path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 5. A genuine scan — no text layer at all
+# 5. Several unrelated tables, some of them the same width
+# --------------------------------------------------------------------------- #
+
+
+def build_multi_table(path: Path) -> None:
+    """Three unrelated tables, two of which have the same column count.
+
+    Models the document class that is not a statement at all — an annual
+    report, a rate card, an accessibility guide — where a page carries several
+    tables that have nothing to do with each other.
+
+    Two failures are guarded here. Tables must not be fused merely because they
+    are the same width, which produces one incoherent CSV whose header belongs
+    to whichever came first and whose totals are meaningless. And none of them
+    may be silently dropped: returning only the biggest loses most of the
+    document without saying so.
+    """
+    builder = PdfBuilder()
+    page = builder.add_page()
+    page.text(40, 800, "QUARTERLY PACK", 13, bold=True)
+
+    def ruled_block(top: float, header: list[str], rows: list[list[str]], layout: TableLayout):
+        y = top
+        top_rule = y + 13
+        layout.draw_row(page, y, header, bold=True)
+        page.line(layout.left, y - 5, layout.right, y - 5)
+        y -= ROW_HEIGHT
+        for row in rows:
+            layout.draw_row(page, y, row)
+            page.line(layout.left, y - 5, layout.right, y - 5)
+            y -= ROW_HEIGHT
+        page.line(layout.left, top_rule, layout.right, top_rule)
+        layout.draw_verticals(page, top_rule, y + ROW_HEIGHT - 5)
+        return y
+
+    three = TableLayout(
+        left=40.0, right=400.0, column_x=[40.0, 200.0, 300.0], align=["l", "r", "r"]
+    )
+
+    # Two tables of identical width, on one page, about different things.
+    page.text(40, 755, "Table A: headcount", 10, bold=True)
+    ruled_block(735, ["Department", "2024", "2025"],
+                [["Finance", "12", "14"], ["Operations", "31", "29"]], three)
+
+    page.text(40, 640, "Table B: office costs", 10, bold=True)
+    ruled_block(620, ["Site", "2024", "2025"],
+                [["London", "220.00", "245.00"], ["Leeds", "118.50", "121.00"]], three)
+
+    # A third, different width.
+    two = TableLayout(left=40.0, right=330.0, column_x=[40.0, 200.0], align=["l", "r"])
+    page.text(40, 520, "Table C: contacts", 10, bold=True)
+    ruled_block(500, ["Name", "Extension"],
+                [["A Patel", "2201"], ["R Okafor", "2202"]], two)
+
+    builder.save(path)
+
+
+# --------------------------------------------------------------------------- #
+# 6. A genuine scan — no text layer at all
 # --------------------------------------------------------------------------- #
 
 
@@ -264,6 +322,7 @@ def main() -> None:
     build_borderless_statement(OUT / "statement_borderless_fr.pdf")
     build_broken_statement(OUT / "statement_broken.pdf")
     build_letter(OUT / "letter_no_table.pdf")
+    build_multi_table(OUT / "multi_table.pdf")
 
     try:
         build_scanned_statement(ruled, OUT / "statement_scanned.pdf")

@@ -176,6 +176,7 @@ class Job:
                 "flags": [f.to_dict() for f in report.flags],
                 "document": self.result.meta.to_dict(),
                 "extra_tables": len(self.result.extra_frames),
+                "tables": [t.to_dict() for t in self.result.tables_out],
             }
             data["downloads"] = self.download_map()
             data["output_dir"] = str(self.output_dir)
@@ -190,14 +191,27 @@ class Job:
             "json": self.exports.report_json.is_file(),
         }
 
-    def preview(self, limit: int = PREVIEW_ROWS, offset: int = 0) -> dict[str, Any]:
-        """A JSON-safe slice of the table, with NaN rendered as null."""
-        if self.result is None or self.result.dataframe is None:
+    def table_count(self) -> int:
+        return len(self.result.tables_out) if self.result else 0
+
+    def frame_for(self, table: int):
+        """The dataframe for a table index, or ``None`` if out of range."""
+        if self.result is None:
+            return None
+        if self.result.tables_out and 0 <= table < len(self.result.tables_out):
+            return self.result.tables_out[table].frame
+        return self.result.dataframe if table == 0 else None
+
+    def preview(
+        self, limit: int = PREVIEW_ROWS, offset: int = 0, table: int = 0
+    ) -> dict[str, Any]:
+        """A JSON-safe slice of one table, with NaN rendered as null."""
+        frame = self.frame_for(table)
+        if frame is None:
             return {"columns": [], "rows": [], "total": 0, "offset": 0, "truncated": False}
 
         import pandas as pd
 
-        frame = self.result.dataframe
         window = frame.iloc[offset : offset + limit]
 
         columns = [str(c) for c in frame.columns]
@@ -210,10 +224,16 @@ class Job:
         for record in window.itertuples(index=False, name=None):
             rows.append([None if pd.isna(v) else _jsonable(v) for v in record])
 
+        flags = []
+        if self.result and self.result.tables_out and 0 <= table < len(self.result.tables_out):
+            flags = [f.to_dict() for f in self.result.tables_out[table].report.flags]
+
         return {
+            "table": table,
             "columns": columns,
             "kinds": kinds,
             "rows": rows,
+            "flags": flags,
             "total": len(frame),
             "offset": offset,
             "truncated": len(frame) > offset + limit,

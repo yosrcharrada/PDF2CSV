@@ -109,6 +109,15 @@ class ExtractedTable:
     """Which strategy produced this: lattice, stream, ocr-grid, ocr-cluster."""
 
     bbox: tuple[float, float, float, float] | None = None
+    """``(x0, top, x1, bottom)`` in PDF points, when the extractor knew it.
+
+    Used to tell a genuine continuation onto the next page — where a table ran
+    out of room at the bottom and resumes at the top of the next — from two
+    unrelated tables that merely happen to have the same number of columns.
+    """
+
+    page_height: float | None = None
+    """Needed to interpret ``bbox`` as "near the bottom" or "near the top"."""
 
     @property
     def n_rows(self) -> int:
@@ -327,6 +336,62 @@ class DocumentMeta:
 
 
 @dataclass
+class TableResult:
+    """One extracted table, with its own reconciliation report.
+
+    A document is not always one table. An accessibility guide, an annual
+    report or a rate card can carry a dozen unrelated tables of different
+    shapes, and picking one and discarding the rest — which is what returning a
+    single dataframe amounts to — loses most of the document without saying so.
+
+    Every table is validated, not only the chosen one. Validation is cheap
+    beside extraction, and a report attached to whichever table the analyst
+    actually wanted is worth far more than a report attached to whichever
+    happened to be biggest.
+    """
+
+    index: int
+    frame: Any
+    report: ValidationReport
+    pages: list[int] = field(default_factory=list)
+    extractor: str = ""
+
+    @property
+    def n_rows(self) -> int:
+        return 0 if self.frame is None else len(self.frame)
+
+    @property
+    def columns(self) -> list[str]:
+        return [] if self.frame is None else [str(c) for c in self.frame.columns]
+
+    def label(self) -> str:
+        """A short human name for the picker: the first couple of columns.
+
+        Uses the column names rather than a number because "Date, Description"
+        is findable in the PDF and "Table 7" is not.
+        """
+        names = [c for c in self.columns if c and not c.startswith("column_")]
+        if not names:
+            return f"Table {self.index + 1}"
+        shown = ", ".join(names[:2])
+        return shown if len(shown) <= 40 else shown[:37] + "..."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "label": self.label(),
+            "pages": self.pages,
+            "n_rows": self.n_rows,
+            "n_columns": len(self.columns),
+            "columns": self.columns,
+            "extractor": self.extractor,
+            "passed": self.report.passed,
+            "summary": self.report.summary(),
+            "checks": [c.to_dict() for c in self.report.checks],
+        }
+
+
+@dataclass
 class ExtractionResult:
     """What :func:`pdf2csv.run` returns. The single currency of this codebase.
 
@@ -341,13 +406,13 @@ class ExtractionResult:
     """Per-page provenance: which strategy read which page, and how well."""
 
     extra_frames: list[Any] = field(default_factory=list)
-    """Secondary tables found in the same document.
+    """Secondary tables, as bare dataframes. Kept for the export writer."""
 
-    A statement often carries a fee summary or a rate table beside the
-    transaction ledger. ``dataframe`` is the one the analyst almost certainly
-    wants; these are offered alongside rather than discarded, because throwing
-    away a table the user can see in the PDF reads as a bug.
-    """
+    tables_out: list[TableResult] = field(default_factory=list)
+    """Every table found, each with its own report. ``tables_out[0]`` is the
+    one ``dataframe`` and ``report`` refer to — the largest, which is the best
+    available guess when the caller has not chosen. The web UI offers the rest
+    rather than hiding them."""
 
     @property
     def n_rows(self) -> int:

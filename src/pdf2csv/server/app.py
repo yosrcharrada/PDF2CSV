@@ -162,11 +162,26 @@ def _register_api(app: FastAPI) -> None:
         job_id: str,
         limit: int = Query(default=500, ge=1, le=5000),
         offset: int = Query(default=0, ge=0),
+        table: int = Query(default=0, ge=0),
     ) -> dict[str, Any]:
         job = _require(job_id)
         if job.status is not JobStatus.DONE:
             raise HTTPException(409, "This document has not finished processing yet.")
-        return job.preview(limit=limit, offset=offset)
+        if table >= max(1, job.table_count()):
+            raise HTTPException(404, "There is no table with that number in this document.")
+        return job.preview(limit=limit, offset=offset, table=table)
+
+    @app.get("/api/jobs/{job_id}/tables")
+    async def tables(job_id: str) -> dict[str, Any]:
+        """Every table found, each with its own reconciliation result.
+
+        A document is not always one table, and returning only the largest
+        silently discards the rest.
+        """
+        job = _require(job_id)
+        if job.result is None:
+            raise HTTPException(409, "This document has not finished processing yet.")
+        return {"tables": [t.to_dict() for t in job.result.tables_out]}
 
     @app.get("/api/jobs/{job_id}/events")
     async def events(job_id: str, request: Request) -> StreamingResponse:
@@ -205,10 +220,22 @@ def _register_api(app: FastAPI) -> None:
         )
 
     @app.get("/api/jobs/{job_id}/download/{kind}")
-    async def download(job_id: str, kind: str) -> FileResponse:
+    async def download(
+        job_id: str, kind: str, table: int = Query(default=0, ge=0)
+    ) -> FileResponse:
         job = _require(job_id)
         if job.exports is None:
             raise HTTPException(409, "Nothing has been produced for this document yet.")
+
+        # Secondary tables are written alongside as <name>.table2.csv and so on.
+        # The workbook already holds every table as its own sheet, and the JSON
+        # report covers the document, so only CSV varies by table.
+        if kind == "csv" and table > 0:
+            position = table - 1
+            if position >= len(job.exports.extras):
+                raise HTTPException(404, "There is no table with that number.")
+            path = job.exports.extras[position]
+            return FileResponse(path, media_type="text/csv", filename=path.name)
 
         targets = {
             "csv": (job.exports.csv, "text/csv"),

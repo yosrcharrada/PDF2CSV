@@ -293,9 +293,22 @@ def extract_scanned_tables(
             boundaries = grid.infer_column_boundaries(_body_rows(scan, rows), scan.width)
             extractor = "ocr-columns"
 
-        text_grid, confidences = grid.build_grid(_table_rows(scan, rows), boundaries)
+        used = _table_rows(scan, rows)
+        text_grid, confidences = grid.build_grid(used, boundaries)
         if not text_grid:
             continue
+
+        boxes = [b for row in used for b in row]
+        bbox = (
+            (
+                min(b.x0 for b in boxes),
+                min(b.y0 for b in boxes),
+                max(b.x1 for b in boxes),
+                max(b.y1 for b in boxes),
+            )
+            if boxes
+            else None
+        )
 
         tables.append(
             ExtractedTable(
@@ -304,6 +317,8 @@ def extract_scanned_tables(
                 rows=text_grid,
                 confidences=confidences,
                 extractor=extractor,
+                bbox=bbox,
+                page_height=scan.height,
             )
         )
         log.info(

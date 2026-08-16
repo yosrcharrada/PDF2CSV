@@ -175,30 +175,85 @@ def _looks_like_header_continuation(header: list[str], candidate: list[str]) -> 
 # --------------------------------------------------------------------------- #
 
 
+_EDGE_FRACTION = 0.28
+"""How close to a page edge a table must sit to look like it ran on or resumed."""
+
+
 def group_tables(tables: list[ExtractedTable]) -> list[list[ExtractedTable]]:
     """Partition per-page tables into runs that are continuations of each other.
 
-    Two tables continue each other when they have the same column count and
-    appear on the same or consecutive pages. Column count is a blunt signal but
-    a reliable one: a summary box and a transaction ledger essentially never
-    share a width, and when they do, merging them is visible in the preview
-    rather than silent in the totals.
+    Matching column counts alone is not enough, and getting this wrong is
+    expensive in both directions: over-grouping fuses unrelated tables into one
+    incoherent CSV whose header comes from whichever came first, while
+    under-grouping hands the analyst a twelve-page statement in twelve pieces.
+
+    Three conditions, all required:
+
+    **Same column count.** Necessary, nowhere near sufficient — in a document
+    of assorted tables, half of them are four columns wide.
+
+    **Consecutive pages, never the same page.** If the extractor returned two
+    separate tables from one page, they *are* two tables: a single ruled grid
+    comes back as one object. Re-merging them undoes a decision that was made
+    correctly with far better information than is available here.
+
+    **The join has to look like a page break.** A table only continues because
+    it ran out of room, so the first must end near the bottom of its page and
+    the second begin near the top of the next. Two four-column tables sitting
+    mid-page on consecutive pages are two tables, however alike their headers
+    look — and in a document that repeats a specimen table to illustrate
+    variations, the headers look identical.
+
+    The geometry test is skipped when bounding boxes are unavailable, falling
+    back to the page-adjacency rule alone.
     """
     groups: list[list[ExtractedTable]] = []
+    signatures: list[str] = []  # the header of each group's first table
 
     for table in tables:
         if table.is_empty:
             continue
-        if groups:
-            previous = groups[-1][-1]
-            same_width = previous.n_cols == table.n_cols
-            adjacent = 0 <= table.page_number - previous.page_number <= 1
-            if same_width and adjacent:
-                groups[-1].append(table)
-                continue
+        if groups and _continues(groups[-1][-1], table, signatures[-1]):
+            groups[-1].append(table)
+            continue
         groups.append([table])
+        header, _ = find_header(table.rows)
+        signatures.append(_row_signature(header) if header else "")
 
     return groups
+
+
+def _continues(
+    previous: ExtractedTable, table: ExtractedTable, group_header: str
+) -> bool:
+    """Is ``table`` the rest of ``previous``, carried onto the next page?"""
+    if previous.n_cols != table.n_cols:
+        return False
+    if table.page_number - previous.page_number != 1:
+        return False
+
+    # A repeated header is the classic, unambiguous continuation marker: page
+    # two of a statement reprints the column titles. Taken on its own because
+    # a short table can legitimately continue without reaching the page
+    # bottom, which the geometry test below would reject.
+    if group_header and table.rows and _row_signature(table.rows[0]) == group_header:
+        return True
+
+    return _runs_to_page_bottom(previous) and _starts_at_page_top(table)
+
+
+def _runs_to_page_bottom(table: ExtractedTable) -> bool:
+    if table.bbox is None or not table.page_height:
+        return True  # no geometry to judge with; fall back to adjacency alone
+    bottom = table.bbox[3]
+    return bottom >= table.page_height * (1.0 - _EDGE_FRACTION)
+
+
+def _starts_at_page_top(table: ExtractedTable) -> bool:
+    if table.bbox is None or not table.page_height:
+        return True
+    top = table.bbox[1]
+    return top <= table.page_height * _EDGE_FRACTION
 
 
 # --------------------------------------------------------------------------- #

@@ -38,6 +38,9 @@ whether its totals ever added up.
   rather than guessing per cell.
 - Reconciles the result against the document's own stated totals and running
   balance, and names the row when it does not agree.
+- Handles documents that hold **many unrelated tables**, not just one ledger:
+  every table is extracted and validated separately, and the interface lets you
+  pick between them rather than guessing on your behalf.
 
 ## What it does not do
 

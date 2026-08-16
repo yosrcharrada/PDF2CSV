@@ -18,7 +18,8 @@ const api = {
   health:   () => fetch('/api/health').then(unwrap),
   jobs:     () => fetch('/api/jobs?limit=8').then(unwrap),
   job:      (id) => fetch(`/api/jobs/${id}`).then(unwrap),
-  preview:  (id) => fetch(`/api/jobs/${id}/preview?limit=500`).then(unwrap),
+  preview:  (id, table = 0) =>
+    fetch(`/api/jobs/${id}/preview?limit=500&table=${table}`).then(unwrap),
   reveal:   (id) => fetch(`/api/jobs/${id}/reveal`, { method: 'POST' }).then(unwrap),
   upload(file, onProgress) {
     // XHR rather than fetch: upload progress is the one thing fetch still
@@ -58,6 +59,7 @@ const state = {
   stream: null,
   ticker: null,
   outputPath: null,
+  table: 0,          // which table of a multi-table document is on screen
 };
 
 /* ---------- Theme --------------------------------------------------------- */
@@ -241,7 +243,7 @@ function download(kind) {
   // A hidden link rather than window.open: no popup blocker, no blank tab
   // flashing open and shut, and the Content-Disposition filename is honoured.
   const link = document.createElement('a');
-  link.href = `/api/jobs/${state.job.id}/download/${kind}`;
+  link.href = `/api/jobs/${state.job.id}/download/${kind}?table=${state.table}`;
   link.download = '';
   document.body.appendChild(link);
   link.click();
@@ -368,29 +370,92 @@ function stopTicker() {
 
 async function finish(job) {
   state.job = job;
+  state.table = 0;
 
   if (job.status === 'failed' || !job.result) {
     showFailure(job.error || 'The document could not be read.');
     return;
   }
 
-  renderVerdict(job);
   renderStats(job);
-  renderChecks(job.result.checks);
+  renderTablePicker(job);
   show('view-result');
+  await showTable(0);
+}
+
+/** Render one table of the document: its checks, its rows, its downloads. */
+async function showTable(index) {
+  const job = state.job;
+  if (!job?.result) return;
+
+  state.table = index;
+  const tables = job.result.tables || [];
+  const chosen = tables[index];
+
+  // Each table carries its own reconciliation report, so the verdict and the
+  // checks follow the selection rather than always describing the first one.
+  const checks = chosen ? chosen.checks : job.result.checks;
+  renderVerdict(job, checks || job.result.checks);
+  renderChecks(checks || job.result.checks);
+
+  document.querySelectorAll('#tables-list .table-chip').forEach((chip, i) => {
+    chip.setAttribute('aria-selected', String(i === index));
+  });
 
   try {
-    const table = await api.preview(job.id);
-    renderPreview(table, job.result.flags || []);
+    const payload = await api.preview(job.id, index);
+    renderPreview(payload, payload.flags || []);
   } catch (error) {
     toast(error.message);
   }
 }
 
-function renderVerdict(job) {
-  const { result } = job;
-  const failures = result.checks.filter((c) => !c.passed && c.severity === 'error');
-  const warnings = result.checks.filter((c) => !c.passed && c.severity === 'warning');
+function renderTablePicker(job) {
+  const tables = job.result.tables || [];
+  const bar = $('tables-bar');
+
+  // One table is the ordinary case; a picker for a single item is clutter.
+  if (tables.length < 2) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+
+  $('tables-title').textContent = `${tables.length} tables in this document`;
+  $('tables-hint').textContent =
+    'Pick one to see its rows and its checks. Each downloads separately; '
+    + 'the Excel file contains all of them.';
+
+  const list = $('tables-list');
+  list.replaceChildren();
+
+  tables.forEach((table, index) => {
+    const chip = element('button', 'table-chip');
+    chip.type = 'button';
+    chip.setAttribute('role', 'tab');
+    chip.setAttribute('aria-selected', String(index === state.table));
+
+    chip.appendChild(element('span', 'chip-name', table.label));
+
+    const meta = element('span', 'chip-meta');
+    const dot = element('span', 'chip-dot');
+    if (!table.passed) dot.classList.add('fail');
+    meta.appendChild(dot);
+    const pages = table.pages.length > 1
+      ? `pages ${table.pages[0]}–${table.pages[table.pages.length - 1]}`
+      : `page ${table.pages[0] ?? '?'}`;
+    meta.appendChild(element('span', null,
+      `${table.n_rows}×${table.n_columns} · ${pages}`));
+    chip.appendChild(meta);
+
+    chip.addEventListener('click', () => showTable(index));
+    list.appendChild(chip);
+  });
+}
+
+function renderVerdict(job, checks) {
+  const failures = checks.filter((c) => !c.passed && c.severity === 'error');
+  const warnings = checks.filter((c) => !c.passed && c.severity === 'warning');
 
   const verdict = $('verdict');
   verdict.classList.remove('is-review', 'is-fail');

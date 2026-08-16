@@ -82,6 +82,7 @@ class _PageWords:
 
     page_number: int
     width: float
+    height: float = 0.0
     rows: list[list[TextBox]] = field(default_factory=list)
     page: Any = None
     band: tuple[int, int] | None = None
@@ -179,33 +180,47 @@ def _usable(tables: list[list[list[str]]]) -> bool:
 
 def extract_with_lines(
     page: Any, *, ragged_tolerance: float
-) -> tuple[list[list[list[str]]], str] | None:
-    """Try the ruling-line strategies. Returns ``(tables, strategy)`` or ``None``.
+) -> tuple[list[tuple[tuple[float, float, float, float] | None, list[list[str]]]], str] | None:
+    """Try the ruling-line strategies. Returns ``([(bbox, rows), ...], strategy)``.
 
     Accepts the first strategy that comes back uniform. There is no scoring
     here on purpose: a drawn grid is ground truth, and a result that follows it
     without raggedness is correct by construction, not merely the best of
     several guesses.
+
+    Uses ``find_tables`` rather than ``extract_tables`` so that each table's
+    bounding box comes back with it. The geometry is what lets the assembly
+    stage tell a genuine continuation onto the next page from two unrelated
+    tables that happen to have the same number of columns.
     """
     if not (getattr(page, "lines", None) or getattr(page, "rects", None)):
         return None
 
     for name, settings in LINE_STRATEGIES:
         try:
-            raw = page.extract_tables(settings)
+            found = page.find_tables(settings)
         except Exception as exc:
             log.debug("page %s: strategy %s raised: %s", page.page_number, name, exc)
             continue
-        if not raw:
+        if not found:
+            continue
+
+        try:
+            raw = [table.extract() for table in found]
+        except Exception as exc:
+            log.debug("page %s: strategy %s failed to extract: %s", page.page_number, name, exc)
             continue
 
         if max((raggedness(t) for t in raw), default=1.0) > ragged_tolerance:
             continue
 
-        tables = [_drop_blank_edges(_rectangularise(t)) for t in raw]
-        tables = [t for t in tables if t]
-        if _usable(tables):
-            return tables, name
+        pairs = [
+            (getattr(table, "bbox", None), _drop_blank_edges(_rectangularise(rows)))
+            for table, rows in zip(found, raw, strict=False)
+        ]
+        pairs = [(bbox, rows) for bbox, rows in pairs if rows]
+        if _usable([rows for _, rows in pairs]):
+            return pairs, name
 
     return None
 
@@ -337,8 +352,10 @@ def extract_digital_tables(
                     rows=rows,
                     confidences=None,  # digital text is exact
                     extractor=strategy,
+                    bbox=bbox,
+                    page_height=float(page.height),
                 )
-                for rows in found
+                for bbox, rows in found
             )
             log.info("page %d: %d table(s) via %s", page_number, len(found), strategy)
             _flush(page)
@@ -351,6 +368,7 @@ def extract_digital_tables(
                 _PageWords(
                     page_number=page_number,
                     width=float(page.width),
+                    height=float(page.height),
                     rows=rows,
                     page=page,
                     band=grid.select_table_band(rows),
@@ -408,12 +426,25 @@ def _build_from_words(entry: _PageWords, boundaries: list[float] | None) -> Extr
         len(text_grid),
         len(text_grid[0]),
     )
+    used = entry.table_rows()
+    bbox = None
+    if used:
+        boxes = [b for row in used for b in row]
+        bbox = (
+            min(b.x0 for b in boxes),
+            min(b.y0 for b in boxes),
+            max(b.x1 for b in boxes),
+            max(b.y1 for b in boxes),
+        )
+
     return ExtractedTable(
         page_number=entry.page_number,
         kind=PageKind.DIGITAL,
         rows=text_grid,
         confidences=None,
         extractor="text-columns",
+        bbox=bbox,
+        page_height=entry.height,
     )
 
 

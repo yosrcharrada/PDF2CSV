@@ -53,6 +53,32 @@ Pages carrying an image and no text layer.
 *Fixture:* `statement_scanned.pdf` — the ruled statement flattened to JPEG with
 no text layer, asserted to recover the closing balance exactly.
 
+### Documents holding several unrelated tables
+
+An annual report, a rate card or a policy pack is not one table spanning pages;
+it is a dozen tables about different things, several of which happen to share a
+column count.
+
+- Every table is extracted, and **every table is validated separately** — the
+  report you read belongs to the table you are looking at.
+- The interface lists them along the top with their size and page numbers, so
+  you can pick the one you want.
+- Each downloads as its own CSV. The Excel workbook contains all of them, one
+  per sheet.
+
+Two failure modes are specifically guarded against, because both were observed
+on real documents:
+
+- Tables are **not** merged just because they are the same width. A single
+  ruled grid arrives as one table, so two tables on one page really are two
+  tables, and a continuation onto the next page has to look like one — the
+  first ending near the page bottom and the second resuming at the top, or the
+  column titles repeating.
+- No table is silently dropped in favour of the biggest.
+
+*Fixture:* `multi_table.pdf` — three tables on one page, two of them the same
+width, asserted to stay separate and all to be returned.
+
 ### Mixed documents
 
 Digital and scanned pages in the same file. Classification is per page, so a

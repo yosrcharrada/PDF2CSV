@@ -28,6 +28,7 @@ from pdf2csv.models import (
     ExtractionResult,
     PageKind,
     Severity,
+    TableResult,
     ValidationReport,
 )
 from pdf2csv.profiles import Profile, select_profile
@@ -182,36 +183,67 @@ def run(
         meta.duration_seconds = time.perf_counter() - started
         return _empty_result(report, meta, tables, resolved_profile)
 
-    normalised = normalize.normalize_table(
-        primary,
-        report,
-        profile=resolved_profile,
-        low_confidence=settings.low_confidence,
-    )
-
-    # --- Validate ------------------------------------------------------------
+    # --- Normalise and validate every table ---------------------------------
+    # Every one, not only the chosen table. A document of assorted tables is
+    # common, and a report attached to whichever table the analyst actually
+    # wanted is worth far more than one attached to whichever was biggest.
     emit("validating", 0, 1, "Checking the numbers reconcile")
-    validate.run_all(normalised, report, meta, resolved_profile)
 
-    extras = _normalise_extras(stitched, primary, resolved_profile, settings)
+    ordered = [primary, *[t for t in stitched if t is not primary]]
+    tables_out: list[TableResult] = []
+
+    for table in ordered:
+        table_report = report if table is primary else ValidationReport()
+        try:
+            normalised = normalize.normalize_table(
+                table,
+                table_report,
+                profile=resolved_profile,
+                low_confidence=settings.low_confidence,
+            )
+            validate.run_all(normalised, table_report, meta, resolved_profile)
+        except Exception:
+            # One awkward secondary table must not sink a document whose
+            # primary extracted perfectly.
+            log.debug("table on page(s) %s could not be processed", table.pages)
+            continue
+
+        tables_out.append(
+            TableResult(
+                index=len(tables_out),
+                frame=normalised.frame,
+                report=table_report,
+                pages=table.pages,
+                extractor=", ".join(table.extractors),
+            )
+        )
+
+    if not tables_out:
+        meta.duration_seconds = time.perf_counter() - started
+        return _empty_result(report, meta, tables, resolved_profile)
+
+    normalised_frame = tables_out[0].frame
+    extras = [t.frame for t in tables_out[1:]]
 
     meta.duration_seconds = time.perf_counter() - started
     emit("done", 1, 1, report.summary())
     log.info(
-        "extracted %d rows x %d columns from %s in %.1fs — %s",
-        len(normalised.frame),
-        len(normalised.frame.columns),
+        "extracted %d rows x %d columns from %s in %.1fs (%d table(s) found) — %s",
+        len(normalised_frame),
+        len(normalised_frame.columns),
         path.name,
         meta.duration_seconds,
+        len(tables_out),
         report.summary(),
     )
 
     return ExtractionResult(
-        dataframe=normalised.frame,
+        dataframe=normalised_frame,
         report=report,
         meta=meta,
         tables=tables,
         extra_frames=extras,
+        tables_out=tables_out,
     )
 
 
@@ -301,36 +333,6 @@ def _run_scanned(
             "The log file has the technical detail.",
         )
         return []
-
-
-def _normalise_extras(
-    stitched: list[stitch.StitchedTable],
-    primary: stitch.StitchedTable,
-    profile: Profile,
-    settings,
-) -> list[pd.DataFrame]:
-    """Type the secondary tables too, but do not validate them.
-
-    They are offered as a convenience; running the reconciliation checks against
-    a fee schedule would fill the report with failures that mean nothing.
-    """
-    extras: list[pd.DataFrame] = []
-    for table in stitched:
-        if table is primary:
-            continue
-        try:
-            throwaway = ValidationReport()
-            extras.append(
-                normalize.normalize_table(
-                    table,
-                    throwaway,
-                    profile=profile,
-                    low_confidence=settings.low_confidence,
-                ).frame
-            )
-        except Exception:
-            log.debug("secondary table on page(s) %s could not be typed", table.pages)
-    return extras
 
 
 def _empty_result(

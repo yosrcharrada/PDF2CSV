@@ -48,6 +48,7 @@ notebooks/*.ipynb
 !tests/fixtures/pdfs/statement_broken.pdf
 !tests/fixtures/pdfs/statement_scanned.pdf
 !tests/fixtures/pdfs/letter_no_table.pdf
+!tests/fixtures/pdfs/multi_table.pdf
 *.xlsx
 !tests/fixtures/expected/*.xlsx
 
