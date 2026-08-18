@@ -248,6 +248,12 @@ python -m pdf2csv declare "DECLARATION CIL 49-2026.pdf" --isin-pool "block d ISI
 | `--dry-run` | Show the row without consuming a code. |
 | `--dpi N` | Default 200, which is enough for these documents. |
 
+> **The ISIN pool ships with the project** — a clone allocates real codes
+> with no setup. The ledger does not travel with it, so two people working
+> from separate clones will be handed the same codes without either
+> knowing. Safe for one analyst on one desktop; see
+> [`docs/DECLARATIONS.md`](docs/DECLARATIONS.md) before it becomes two.
+>
 > **The ledger is the record of what has been issued, not the workbook.**
 > Allocation is idempotent — re-running the same declaration returns the same
 > ISIN rather than burning a second one, and two subscribers to the same

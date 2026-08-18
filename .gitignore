@@ -70,8 +70,15 @@ Desktop.ini
 .claude/
 
 # --- ISIN workbook -----------------------------------------------------------
-# A client's real workbook holds finite, reserved codes and is never committed;
-# the blanket *.xlsx rule above already covers it. Drop it in isin/ and it is
-# found automatically. This exception has to come last: git applies the final
-# matching rule, so placing it before *.xlsx would have no effect.
-!/isin/sample-pool.xlsx
+# The workbook in isin/ IS distributed with the project, by decision: everyone
+# who clones gets the same pool and it is used without any configuration.
+#
+# The consequence to keep in mind is that the pool travels but the ledger does
+# not. Consumed codes are recorded per machine, so two people allocating from
+# their own clones will hand out the same ISINs without either knowing. That is
+# safe for one analyst on one desktop and is not safe for two -- see
+# docs/DECLARATIONS.md.
+#
+# This exception has to come last: git applies the final matching rule, so
+# placing it before the blanket *.xlsx rule above would have no effect.
+!/isin/*.xlsx

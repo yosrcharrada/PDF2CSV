@@ -39,12 +39,13 @@ survives a 200 DPI scan comfortably.
 | `declarations/mapping.py` — fields 2–22 | **Done.** Reproduces the reference row exactly |
 | `declarations/facts.py` — OCR the five facts | **Done** for single-declaration documents |
 | Reference case, end to end from the scan | **Verified.** All 22 fields, all 4 checks |
-| ISIN allocation | **Blocked** — needs the workbook |
+| ISIN allocation | **Done.** The workbook ships with the project and is found automatically |
 | Multi-row *Billet de Trésorerie* documents | **Not supported** — see below |
-| UI | Not started — the target screenshot did not upload |
+| UI | **Done.** Dropping a declaration in the browser produces the row |
 
-33 tests cover this subpackage. None of them use client documents, and no
-client document is committed to this repository.
+36 tests cover this subpackage. None of them use a client PDF. The ISIN
+workbook is committed deliberately — see below — and is the only client file in
+the repository.
 
 ---
 
@@ -93,6 +94,29 @@ pypdfium2, which costs nothing since these are scans with no text layer.
 
 ---
 
+## The ISIN pool is distributed — and the ledger is not
+
+The workbook ships with the project, so a clone allocates real codes with no
+configuration. That is deliberate. The consequence is not obvious and matters:
+
+**Consumed codes are recorded per machine.** The ledger (`isin_ledger.json`)
+lives beside the logs and is never committed — it cannot be, since it changes
+on every run. So two people working from their own clones will be handed the
+**same ISINs**, and neither will know.
+
+That is safe for one analyst on one desktop, which is the deployment this was
+built for. It is not safe for two. Before a second person starts issuing codes,
+one of these has to be true:
+
+- one machine does all the allocation, or
+- the ledger lives on a shared drive and everyone points at it, or
+- each machine gets its own block in its own workbook.
+
+The tool cannot detect the clash: from inside one clone, a code consumed
+elsewhere looks unused. Exhaustion is loud; collision is silent.
+
+---
+
 ## Open questions
 
 These are unchanged from the spec and still block or risk work. Each has a
@@ -100,13 +124,15 @@ concrete consequence, so none is cosmetic.
 
 | # | Question | Consequence if wrong / missing |
 |---|---|---|
-| 1 | **The ISIN workbook** — file, or its structure: sheet naming, code column, ordering | **Blocks the build.** Nothing can be exported without it |
-| 2 | **Exact CSV header strings and columns M–V** — your screenshot truncates after `IssuanceProgramme` | A downstream import fails on a header mismatch |
-| 3 | Title tokens for the **seven non-CIL issuers** | Only CIL is confirmed; the rest are inferred from code prefixes. A wrong token silently attributes a row to another company |
-| 4 | `Discount` vs `DISCOUNT` — exact casing | String-matched downstream |
-| 5 | `certificat de **deport** sup 1 an TF` — typo, or load-bearing? | Affects every Coupon row |
-| 6 | BH Leasing issuer code ends **`00004`** where all others end `00003` | Affects every BHL row, and nothing else would reveal it |
-| 7 | `rate` as `8` or `8,00`; dates as `31/07/2026` or ISO | Format mismatch downstream |
+| 1 | **`code`** — the subscriber's RIB. It also determines `BIC`, and appears nowhere in the declaration PDF | Two columns cannot be produced at all |
+| 2 | **`nominalValueAllotted`** — confirmed as 500 × quantity, but all four reference rows show 500 000 × quantity | Every row is out by a factor of 1000 |
+| 3 | **`auctionDate`** — the subscription date on the CIL row, the fiche date on the BTK rows | Three date columns |
+| 4 | **`amountToBePaid`** — zero on two BTK rows, Montant Net on the third | Silent, and looks ordinary either way |
+| 5 | `startDate `, `guarantor `, `entitlement Date` carry stray spaces in `TCN CIL.csv` but not in the BTKL file | Header mismatch on import. The clean spelling is used |
+| 6 | Title tokens for the **seven non-CIL issuers** | Only CIL is confirmed; the rest are inferred from code prefixes. A wrong token silently attributes a row to another company |
+| 7 | `client` is `no` in one reference file and `No` in the other | String-matched downstream |
+| 8 | BH Leasing issuer code ends **`00004`** where all others end `00003` | Affects every BHL row, and nothing else would reveal it |
+| 9 | `certificat de **deport** sup 1an TF` — typo, or load-bearing? | Affects every Coupon row |
 
 ---
 
