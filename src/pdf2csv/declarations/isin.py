@@ -26,19 +26,85 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pdf2csv.config import get_settings
 from pdf2csv.declarations.mapping import DeclarationFacts, Issuer, issuer_from_title
 from pdf2csv.logging_setup import get_logger
 
 log = get_logger(__name__)
 
-__all__ = ["AllocationError", "IsinLedger", "IsinPool", "PoolExhausted", "allocation_key"]
+__all__ = [
+    "AllocationError",
+    "IsinLedger",
+    "IsinPool",
+    "PoolExhausted",
+    "allocation_key",
+    "discover_pool",
+]
 
 _ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[A-Z0-9]$")
 _HEADER_WORDS = ("bloc", "isin")
+
+
+POOL_DIRNAME = "isin"
+"""Folder searched for the workbook, beside the application."""
+
+
+def discover_pool() -> Path | None:
+    """Find the ISIN workbook without being told where it is.
+
+    Passing a path on every run is a step that gets forgotten, and a forgotten
+    pool means a row exported with an empty ISIN — which looks like output and
+    is not usable. Searched in order:
+
+    1. ``PDF2CSV_ISIN_POOL``, so a deployment can point anywhere;
+    2. an ``isin`` folder beside the application or the bundle;
+    3. the working directory.
+
+    Any ``.xlsx`` in those folders is accepted, preferring one whose name
+    mentions ISIN, so the workbook can be dropped in under whatever name the
+    finance team gave it. Returns ``None`` when nothing is found, which the
+    caller reports as a check rather than an error.
+    """
+    explicit = os.environ.get("PDF2CSV_ISIN_POOL", "").strip()
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        return candidate if candidate.is_file() else None
+
+    roots: list[Path] = []
+    try:
+        home = get_settings().home
+        roots += [home / POOL_DIRNAME, home]
+    except Exception:
+        pass
+
+    package_root = Path(__file__).resolve().parent.parent.parent
+    roots += [
+        package_root / POOL_DIRNAME,
+        package_root.parent / POOL_DIRNAME,
+        Path.cwd() / POOL_DIRNAME,
+    ]
+
+    for root in roots:
+        try:
+            if not root.is_dir():
+                continue
+            books = sorted(root.glob("*.xlsx"))
+        except OSError:
+            continue
+        if not books:
+            continue
+        # Prefer a name that mentions ISIN; otherwise take the first.
+        named = [b for b in books if "isin" in b.name.casefold()]
+        chosen = (named or books)[0]
+        log.info("found ISIN workbook at %s", chosen)
+        return chosen
+
+    return None
 
 
 class AllocationError(RuntimeError):

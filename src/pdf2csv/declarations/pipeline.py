@@ -15,7 +15,6 @@ has no text layer at all, and so might be) is put through OCR.
 from __future__ import annotations
 
 import datetime as dt
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -208,7 +207,9 @@ class _Allocator:
 
     @classmethod
     def create(cls, isin_pool: str | Path | None) -> _Allocator:
-        source = isin_pool or os.environ.get("PDF2CSV_ISIN_POOL", "").strip()
+        from pdf2csv.declarations.isin import discover_pool
+
+        source = isin_pool or discover_pool()
         if not source:
             return cls()
 

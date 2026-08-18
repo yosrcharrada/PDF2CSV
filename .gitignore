@@ -23,6 +23,9 @@ coverage.xml
 # overwrite the real one and reissue codes already in circulation.
 isin_ledger.json
 *.isin_ledger.json
+# The ISIN workbook holds a client's real, finite, reserved codes.
+# Drop it in isin/ and it is found automatically; it is never committed.
+# The obviously-fake sample-pool.xlsx is committed so a fresh clone runs.
 /logs/
 /output/
 /.cache/
@@ -65,3 +68,10 @@ Desktop.ini
 .vscode/
 .idea/
 .claude/
+
+# --- ISIN workbook -----------------------------------------------------------
+# A client's real workbook holds finite, reserved codes and is never committed;
+# the blanket *.xlsx rule above already covers it. Drop it in isin/ and it is
+# found automatically. This exception has to come last: git applies the final
+# matching rule, so placing it before *.xlsx would have no effect.
+!/isin/sample-pool.xlsx

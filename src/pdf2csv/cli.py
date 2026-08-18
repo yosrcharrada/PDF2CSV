@@ -366,12 +366,18 @@ def command_declare(args: argparse.Namespace) -> int:
         )
         return 2
 
+    from pdf2csv.declarations.isin import discover_pool
+
+    # Found automatically when not given, so the path is not something to
+    # remember on every run.
+    pool_path = args.isin_pool or discover_pool()
+
     pool = ledger = None
-    if args.isin_pool:
+    if pool_path:
         from pdf2csv.declarations.isin import AllocationError, IsinLedger, IsinPool, allocate
 
         try:
-            pool = IsinPool.load(args.isin_pool)
+            pool = IsinPool.load(pool_path)
             ledger_path = (
                 Path(args.ledger)
                 if args.ledger
