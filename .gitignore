@@ -17,6 +17,12 @@ htmlcov/
 coverage.xml
 
 # --- Project runtime output (never commit client data) ---
+# The ISIN ledger records which of the client's real, finite codes have
+# been consumed. It is live operational state, not source: committing it
+# would publish the allocation register and, worse, let a checkout
+# overwrite the real one and reissue codes already in circulation.
+isin_ledger.json
+*.isin_ledger.json
 /logs/
 /output/
 /.cache/

@@ -328,11 +328,23 @@ class JobManager:
         job.status = JobStatus.RUNNING
         job.started_at = time.time()
         try:
-            result = run(job.upload_path, profile=profile, progress=job.record)
+            # A certificat de dépôt declaration is not a table to transcribe —
+            # it is five facts that derive a fixed row. Reading it with the
+            # ordinary table extractor produces something that looks like data
+            # and is not, so it is tried first and only for documents that
+            # actually look like one.
+            result = self._try_declaration(job)
+            if result is None:
+                result = run(job.upload_path, profile=profile, progress=job.record)
             job.result = result
 
             stem = Path(job.filename).stem
-            job.exports = export_result(result, job.output_dir / f"{stem}.csv")
+            # The finance team's reference files are semicolon-delimited,
+            # which these rows need because their values contain commas.
+            delimiter = ";" if result.meta.profile == "declaration" else ","
+            job.exports = export_result(
+                result, job.output_dir / f"{stem}.csv", delimiter=delimiter
+            )
 
             job.status = JobStatus.DONE
             job.record("done", 1, 1, result.report.summary())
@@ -344,6 +356,22 @@ class JobManager:
             log.exception("job %s failed", job.id)
         finally:
             job.finished_at = time.time()
+
+    def _try_declaration(self, job: Job):
+        """Read the upload as a declaration, or return ``None``.
+
+        Never allowed to fail the job: if this path raises for any reason, the
+        ordinary table extractor still runs and the analyst still gets output.
+        """
+        try:
+            from pdf2csv.declarations.pipeline import looks_like_declaration, run_declaration
+
+            if not looks_like_declaration(job.upload_path):
+                return None
+            return run_declaration(job.upload_path, progress=job.record)
+        except Exception:
+            log.exception("job %s: declaration path failed, falling back", job.id)
+            return None
 
     # -- access --------------------------------------------------------------
     def get(self, job_id: str) -> Job | None:

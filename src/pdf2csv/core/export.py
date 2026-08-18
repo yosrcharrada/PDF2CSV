@@ -54,6 +54,7 @@ def export_result(
     *,
     write_xlsx: bool = True,
     write_extras: bool = True,
+    delimiter: str = ",",
 ) -> ExportPaths:
     """Write the CSV, its validation sidecar, and optionally an Excel workbook.
 
@@ -71,7 +72,10 @@ def export_result(
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
     frame: pd.DataFrame = result.dataframe
-    frame.to_csv(csv_path, index=False, encoding=CSV_ENCODING)
+    # Semicolons matter when the values carry comma decimals: with a comma
+    # delimiter, "CIL 8,00% 09092026" has to be quoted, and a downstream
+    # reader in a comma-decimal locale sees a different number.
+    frame.to_csv(csv_path, index=False, encoding=CSV_ENCODING, sep=delimiter)
 
     report_path = csv_path.with_suffix(".validation.json")
     report_path.write_text(
@@ -83,7 +87,7 @@ def export_result(
     if write_extras and result.extra_frames:
         for index, extra in enumerate(result.extra_frames, start=2):
             extra_path = csv_path.with_suffix(f".table{index}.csv")
-            extra.to_csv(extra_path, index=False, encoding=CSV_ENCODING)
+            extra.to_csv(extra_path, index=False, encoding=CSV_ENCODING, sep=delimiter)
             paths.extras.append(extra_path)
 
     if write_xlsx:
