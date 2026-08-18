@@ -110,12 +110,38 @@ CLIENT = "NO"
 """Fixed until client creation exists. The entire FICHE DU SOUSCRIPTEUR block —
 name, nationality, identifier, address, balance — is therefore unused."""
 
+# Columns 23-36 describe the subscriber. They are always written and always
+# empty: `client` is fixed at "no", so nothing here is derived, and the analyst
+# fills them in afterwards. Emitting them empty rather than omitting them keeps
+# every export the same shape, which is what a downstream import needs.
+CLIENT_COLUMNS = [
+    "clientId",
+    "clientType",
+    "firstName",
+    "lastName",
+    "registrationDate",
+    "economicSector",
+    "residentStatus",
+    "nationality",
+    "defaultAssetCategory",
+    "natureOfIdentification",
+    "nationalId",
+    "fiscalId",
+    "gender",
+    "investorType",
+]
+
+# The 36 columns of the finance team's reference files, in their order and
+# with their exact spelling -- including "totalnumberOfCertificates" with a
+# lower-case n. Both reference files agree on every name, so these are copied
+# rather than guessed. Column order and spelling are part of the contract with
+# whatever imports this, not a presentation choice.
 COLUMNS = [
     "ISIN",
     "name",
     "issuer",
     "rate",
-    "totalNumberOfCertificates",
+    "totalnumberOfCertificates",
     "totalAmountToBePaid",
     "auctionDate",
     "type",
@@ -129,11 +155,14 @@ COLUMNS = [
     "auctionType",
     "BIC",
     "code",
-    "nominal",
-    "quantity",
+    "nominalValueAllotted",
+    "numberOfCertificates",
     "amountToBePaid",
     "client",
+    *CLIENT_COLUMNS,
 ]
+
+assert len(COLUMNS) == 36
 
 
 # --------------------------------------------------------------------------- #
@@ -264,7 +293,7 @@ def to_row(facts: DeclarationFacts, isin: str) -> dict[str, object]:
         "name": build_name(issuer, facts.taux, facts.date_remboursement),
         "issuer": issuer.issuer_code,
         "rate": format_rate(facts.taux),
-        "totalNumberOfCertificates": facts.quantite,
+        "totalnumberOfCertificates": facts.quantite,
         "totalAmountToBePaid": 0,
         "auctionDate": fr(reference),
         "type": type_,
@@ -278,10 +307,12 @@ def to_row(facts: DeclarationFacts, isin: str) -> dict[str, object]:
         "auctionType": AUCTION_TYPE,
         "BIC": issuer.bic,
         "code": "",
-        "nominal": NOMINAL_PER_CERTIFICATE * facts.quantite,
-        "quantity": facts.quantite,
+        "nominalValueAllotted": NOMINAL_PER_CERTIFICATE * facts.quantite,
+        "numberOfCertificates": facts.quantite,
         "amountToBePaid": 0,
         "client": CLIENT,
+        # Always present, always blank -- filled in by the analyst.
+        **dict.fromkeys(CLIENT_COLUMNS, ""),
     }
 
 

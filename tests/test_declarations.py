@@ -44,7 +44,7 @@ EXPECTED = {
     "name": "CIL 8,00% 09092026",
     "issuer": "CILTTN00003",
     "rate": "8",   # not 8.0 -- the reference files write "8" and "8,4"
-    "totalNumberOfCertificates": 10,
+    "totalnumberOfCertificates": 10,
     "totalAmountToBePaid": 0,
     "auctionDate": "31/07/2026",
     "type": "Discount",
@@ -60,10 +60,25 @@ EXPECTED = {
     "auctionType": "Standard",
     "BIC": "CILTTN00020",
     "code": "",
-    "nominal": 5000,
-    "quantity": 10,
+    "nominalValueAllotted": 5000,
+    "numberOfCertificates": 10,
     "amountToBePaid": 0,
     "client": "NO",
+    # Columns 23-36: always written, always empty, filled by the analyst.
+    "clientId": "",
+    "clientType": "",
+    "firstName": "",
+    "lastName": "",
+    "registrationDate": "",
+    "economicSector": "",
+    "residentStatus": "",
+    "nationality": "",
+    "defaultAssetCategory": "",
+    "natureOfIdentification": "",
+    "nationalId": "",
+    "fiscalId": "",
+    "gender": "",
+    "investorType": "",
 }
 
 
@@ -76,7 +91,7 @@ class TestReferenceCase:
         """The CSV is consumed by another system; column order is part of the
         contract, not a presentation detail."""
         assert list(to_row(REFERENCE, isin="X")) == COLUMNS
-        assert len(COLUMNS) == 22
+        assert len(COLUMNS) == 36
 
     def test_reconciliation_passes(self):
         assert all(c["passed"] for c in reconcile(REFERENCE))
@@ -149,7 +164,7 @@ class TestDerivedFields:
     def test_nominal_is_500_per_certificate_not_the_printed_unit_price(self):
         """Prix unitaire is 500 000,000 on the reference document. Deriving the
         nominal from it would give 5 000 000, not 5 000."""
-        assert to_row(REFERENCE, "X")["nominal"] == 5000
+        assert to_row(REFERENCE, "X")["nominalValueAllotted"] == 5000
 
     def test_dates_all_come_from_the_subscription_date(self):
         """"Date actuel" is the subscription date, not the processing date.
@@ -326,3 +341,27 @@ class TestExtraction:
         page = reference_page()
         page.boxes = [b for b in page.boxes if b.text != "10"]
         assert extract_from_boxes(page) is None
+
+
+class TestReferenceHeader:
+    """The header is a contract with whatever imports this file."""
+
+    def test_matches_the_finance_team_header_exactly(self):
+        expected = (
+            "ISIN;name;issuer;rate;totalnumberOfCertificates;totalAmountToBePaid;"
+            "auctionDate;type;issueDate;startDate;maturityDate;issuanceProgramme;"
+            "instrument;guarantor;entitlementDate;auctionType;BIC;code;"
+            "nominalValueAllotted;numberOfCertificates;amountToBePaid;client;"
+            "clientId;clientType;firstName;lastName;registrationDate;economicSector;"
+            "residentStatus;nationality;defaultAssetCategory;natureOfIdentification;"
+            "nationalId;fiscalId;gender;investorType"
+        )
+        assert ";".join(COLUMNS) == expected
+
+    def test_the_subscriber_block_is_present_and_empty(self):
+        """Written on every row so each export has the same shape, and left
+        blank because client is fixed at "no" and the analyst fills them in."""
+        row = to_row(REFERENCE, "X")
+        for column in COLUMNS[22:]:
+            assert column in row
+            assert row[column] == ""
