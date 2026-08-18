@@ -223,6 +223,39 @@ figures — exactly the failure this tool exists to catch.
 
 ---
 
+## Certificat de dépôt declarations
+
+A separate path for a different job. `convert` reads whatever table is in a PDF;
+`declare` reads five known facts from a declaration and derives a fixed row from
+them. See [`docs/DECLARATIONS.md`](docs/DECLARATIONS.md).
+
+Read a declaration and print the row, without touching the ISIN pool:
+
+```bash
+python -m pdf2csv declare "DECLARATION CIL 49-2026.pdf" --dry-run
+```
+
+Allocate an ISIN and write the CSV:
+
+```bash
+python -m pdf2csv declare "DECLARATION CIL 49-2026.pdf" --isin-pool "block d ISIN.xlsx" -o out.csv
+```
+
+| Option | |
+|---|---|
+| `--isin-pool PATH` | The *block d ISIN* workbook. Omit and the ISIN column is left empty. |
+| `--ledger PATH` | Allocation record. Defaults to `isin_ledger.json` beside the logs. |
+| `--dry-run` | Show the row without consuming a code. |
+| `--dpi N` | Default 200, which is enough for these documents. |
+
+> **The ledger is the record of what has been issued, not the workbook.**
+> Allocation is idempotent — re-running the same declaration returns the same
+> ISIN rather than burning a second one, and two subscribers to the same
+> issuance share a code. When a sheet runs out the export fails loudly rather
+> than reusing or blanking a code.
+
+Requires the OCR add-on (Step 3): these documents are scans.
+
 ## Other ways to run it
 
 Convert one file without the browser. Exit code is `1` when the numbers do not

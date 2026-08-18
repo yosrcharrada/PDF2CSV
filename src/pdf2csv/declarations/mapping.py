@@ -24,6 +24,7 @@ __all__ = [
     "Issuer",
     "build_name",
     "classify_type",
+    "format_rate",
     "isin_group_key",
     "issuer_from_title",
     "reconcile",
@@ -101,8 +102,8 @@ TYPE_COUPON = "Coupon"
 # certainly a typo for "dépôt" in the source document, and is reproduced exactly
 # because if the receiving system string-matches, correcting the spelling breaks
 # every Coupon row while looking like an improvement. Flagged for confirmation.
-INSTRUMENT_DISCOUNT = "certificat de depot inf 1 an TF"
-INSTRUMENT_COUPON = "certificat de deport sup 1 an TF"
+INSTRUMENT_DISCOUNT = "certificat de depot inf 1an TF"
+INSTRUMENT_COUPON = "certificat de deport sup 1an TF"
 
 AUCTION_TYPE = "Standard"
 CLIENT = "NO"
@@ -209,6 +210,17 @@ def issuer_from_title(title: str) -> Issuer:
     )
 
 
+def format_rate(taux: float) -> str:
+    """Field 4, as the reference files write it: ``8`` and ``8,4``.
+
+    French decimal comma, trailing zeros trimmed. Not ``8.0``: the receiving
+    system is fed a semicolon-delimited file written in a comma-decimal locale,
+    and a full stop there is a different number.
+    """
+    text = f"{taux:.4f}".rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
 def format_taux(taux: float) -> str:
     """``8.0`` → ``'8,00%'`` — two decimals, comma separator, French convention."""
     return f"{taux:.2f}".replace(".", ",") + "%"
@@ -251,7 +263,7 @@ def to_row(facts: DeclarationFacts, isin: str) -> dict[str, object]:
         "ISIN": isin,
         "name": build_name(issuer, facts.taux, facts.date_remboursement),
         "issuer": issuer.issuer_code,
-        "rate": facts.taux,
+        "rate": format_rate(facts.taux),
         "totalNumberOfCertificates": facts.quantite,
         "totalAmountToBePaid": 0,
         "auctionDate": fr(reference),

@@ -321,6 +321,147 @@ def command_cache(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# declare
+# --------------------------------------------------------------------------- #
+
+
+def command_declare(args: argparse.Namespace) -> int:
+    """Turn a certificat de dépôt declaration into a standard row.
+
+    A different job from ``convert``: that reads whatever table is in the PDF,
+    while this reads five known facts and derives a fixed row from them. Kept as
+    its own command because the two have nothing in common but the file type.
+    """
+    import csv
+
+    from pdf2csv.declarations.facts import extract_declarations
+    from pdf2csv.declarations.mapping import COLUMNS, reconcile, to_row
+
+    setup_logging(level="DEBUG" if args.verbose else "WARNING")
+
+    source = Path(args.pdf)
+    if not source.is_file():
+        print(f"\n  No such file: {source}\n", file=sys.stderr)
+        return 2
+
+    def show(current: int, total: int, message: str) -> None:
+        if not args.quiet:
+            print(f"  {message}", flush=True)
+
+    try:
+        facts_list = extract_declarations(str(source), dpi=args.dpi, progress=show)
+    except RuntimeError as exc:  # OCR add-on missing
+        print(f"\n  {exc}\n", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"\n  {source.name} could not be read: {exc}\n", file=sys.stderr)
+        return 2
+
+    if not facts_list:
+        print(
+            f"\n  No declaration could be read from {source.name}.\n"
+            "  This path handles single-declaration documents. Multi-row\n"
+            "  'Billet de Tresorerie' fiches are not supported yet.\n",
+            file=sys.stderr,
+        )
+        return 2
+
+    pool = ledger = None
+    if args.isin_pool:
+        from pdf2csv.declarations.isin import AllocationError, IsinLedger, IsinPool, allocate
+
+        try:
+            pool = IsinPool.load(args.isin_pool)
+            ledger_path = (
+                Path(args.ledger)
+                if args.ledger
+                else get_settings().home / "isin_ledger.json"
+            )
+            ledger = IsinLedger.load(ledger_path)
+        except AllocationError as exc:
+            print(f"\n  {exc}\n", file=sys.stderr)
+            return 2
+
+    rows: list[dict] = []
+    failed = 0
+
+    for facts in facts_list:
+        isin, reused = "", False
+        if pool is not None and ledger is not None and not args.dry_run:
+            from pdf2csv.declarations.isin import AllocationError, allocate
+
+            try:
+                isin, reused = allocate(facts, pool, ledger)
+            except AllocationError as exc:
+                print(f"\n  {exc}\n", file=sys.stderr)
+                return 2
+
+        try:
+            row = to_row(facts, isin=isin)
+        except ValueError as exc:
+            print(f"\n  {exc}\n", file=sys.stderr)
+            return 2
+        rows.append(row)
+
+        print()
+        print(f"  Page {facts.source_page}  (read with {facts.confidence:.0%} confidence)")
+        print("  " + "-" * 62)
+        print(f"    title              {facts.title}")
+        print(f"    taux               {facts.taux}")
+        print(f"    quantite           {facts.quantite}")
+        print(f"    souscription       {facts.date_souscription}")
+        print(f"    remboursement      {facts.date_remboursement}")
+        if facts.prix_unitaire is not None:
+            print(f"    prix unitaire      {facts.prix_unitaire:,.3f}")
+        if facts.montant is not None:
+            print(f"    montant            {facts.montant:,.3f}")
+        print()
+        for name in COLUMNS:
+            print(f"    {name:28s} {row[name]}")
+
+        print()
+        checks = reconcile(facts)
+        if pool is not None and not args.dry_run:
+            from pdf2csv.declarations.isin import allocation_check
+
+            checks.append(allocation_check(isin, reused))
+        for check in checks:
+            mark = "ok  " if check["passed"] else "FAIL"
+            if not check["passed"]:
+                failed += 1
+            print(f"    [{mark}] {check['title']}: {check['detail']}")
+
+    if args.output:
+        destination = Path(args.output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # Semicolon-delimited and UTF-8 with a BOM, matching the reference
+        # files from the finance team and opening correctly in Windows Excel.
+        with destination.open("w", newline="", encoding="utf-8-sig") as handle:
+            writer = csv.DictWriter(handle, fieldnames=COLUMNS, delimiter=";")
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\n  Written to {destination}")
+
+    if pool is None:
+        print(
+            "\n  Note: no --isin-pool was given, so the ISIN column is empty.\n"
+            "  Pass --isin-pool \"block d ISIN.xlsx\" to allocate one."
+        )
+
+    print(
+        # ASCII only. A Windows console may be running any codepage, and a
+        # mojibake note is a note nobody reads.
+        "\n  Note: this writes the 22 confirmed fields; the finance team's\n"
+        "  reference files use 36. Four rules are still unresolved:\n"
+        "    auctionDate, code, amountToBePaid, and nominal -\n"
+        "    your answer said 500 x quantity, but all four reference rows\n"
+        "    show 500 000 x quantity (i.e. the montant).\n"
+        "  See docs/DECLARATIONS.md.\n"
+    )
+    return 0 if failed == 0 else 1
+
+
+# --------------------------------------------------------------------------- #
 # Parser
 # --------------------------------------------------------------------------- #
 
@@ -348,6 +489,26 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("-q", "--quiet", action="store_true")
     convert.add_argument("-v", "--verbose", action="store_true")
     convert.set_defaults(func=command_convert)
+
+    declare = subcommands.add_parser(
+        "declare",
+        help="read a certificat de depot declaration into a standard row",
+    )
+    declare.add_argument("pdf")
+    declare.add_argument("-o", "--output", help="destination CSV")
+    declare.add_argument(
+        "--isin-pool", help="the 'block d ISIN' workbook; omit to leave ISIN empty"
+    )
+    declare.add_argument("--ledger", help="allocation ledger (default: alongside the logs)")
+    declare.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="do not consume an ISIN, just show what would be produced",
+    )
+    declare.add_argument("--dpi", type=int, default=200)
+    declare.add_argument("-q", "--quiet", action="store_true")
+    declare.add_argument("-v", "--verbose", action="store_true")
+    declare.set_defaults(func=command_declare)
 
     check = subcommands.add_parser("check", help="print an environment report")
     check.set_defaults(func=command_check)

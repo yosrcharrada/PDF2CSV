@@ -14,7 +14,7 @@ pypdfium2>=4.30,<5              # BSD-3 — rasterising, pure wheel, no Poppler
 # --- Data --------------------------------------------------------------------
 pandas>=2.2,<3                  # BSD-3
 numpy>=1.26,<3                  # BSD-3
-openpyxl>=3.1,<4                # MIT   — .xlsx export
+openpyxl>=3.1,<4                # MIT   — .xlsx export, and the ISIN workbook
 PyYAML>=6.0,<7                  # MIT   — document profiles
 
 # --- Web UI ------------------------------------------------------------------

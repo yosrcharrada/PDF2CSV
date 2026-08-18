@@ -43,7 +43,7 @@ EXPECTED = {
     "ISIN": "TNEDPD3F01J5",
     "name": "CIL 8,00% 09092026",
     "issuer": "CILTTN00003",
-    "rate": 8.0,
+    "rate": "8",   # not 8.0 -- the reference files write "8" and "8,4"
     "totalNumberOfCertificates": 10,
     "totalAmountToBePaid": 0,
     "auctionDate": "31/07/2026",
@@ -52,7 +52,9 @@ EXPECTED = {
     "startDate": "31/07/2026",
     "maturityDate": "09/09/2026",
     "issuanceProgramme": "",
-    "instrument": "certificat de depot inf 1 an TF",
+    # "1an", not "1 an" -- both reference CSVs from the finance team agree,
+    # and the spec transcribed it with a space.
+    "instrument": "certificat de depot inf 1an TF",
     "guarantor": "",
     "entitlementDate": "31/07/2026",
     "auctionType": "Standard",
@@ -108,6 +110,12 @@ class TestIssuerLookup:
 
 
 class TestDerivedFields:
+    def test_rate_uses_a_comma_decimal_with_trailing_zeros_trimmed(self):
+        from pdf2csv.declarations.mapping import format_rate
+        assert format_rate(8.0) == "8"
+        assert format_rate(8.4) == "8,4"
+        assert format_rate(7.84) == "7,84"
+
     def test_taux_formatting_is_french(self):
         assert format_taux(8.0) == "8,00%"
         assert format_taux(7.845) == "7,84%" or format_taux(7.845) == "7,85%"
@@ -136,7 +144,7 @@ class TestDerivedFields:
             date_souscription=dt.date(2026, 1, 1),
             date_remboursement=dt.date(2028, 1, 1),
         )
-        assert to_row(coupon, "X")["instrument"] == "certificat de deport sup 1 an TF"
+        assert to_row(coupon, "X")["instrument"] == "certificat de deport sup 1an TF"
 
     def test_nominal_is_500_per_certificate_not_the_printed_unit_price(self):
         """Prix unitaire is 500 000,000 on the reference document. Deriving the
