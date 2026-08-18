@@ -316,6 +316,15 @@ def _digits_to_float(s: str, decimal_sep: str | None) -> float | None:
     if s.count(".") > 1:  # unsalvageable
         return None
 
+    # A run of digits this long is not a monetary amount; it is two or more
+    # cells that OCR ran together. Beyond 2^53 a float cannot even represent
+    # the integer exactly, so the result would be both fictional and lossy --
+    # and it arrives looking like 3.65e+38, which is exactly the kind of value
+    # that survives review because nobody expects a number that shape.
+    whole = s.split(".")[0].lstrip("0")
+    if len(whole) > 15:
+        return None
+
     try:
         return float(s)
     except ValueError:

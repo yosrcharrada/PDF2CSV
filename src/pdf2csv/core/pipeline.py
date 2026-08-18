@@ -94,15 +94,35 @@ def run(
     emit("reading", 0, 1, f"Opening {path.name}")
     meta.sha256 = cache.file_sha256(path)
 
+    # pdfplumber is the preferred reader because it exposes the text layer, but
+    # it is not the only one that can open a PDF. A real document in the sample
+    # set reports zero pages through pdfplumber and renders perfectly through
+    # pdfium, so a failure here is not the end of the road — it just means every
+    # page has to be treated as an image.
+    pdf = None
     try:
         pdf = pdfplumber.open(str(path))
+        page_count = len(pdf.pages)
     except Exception as exc:
-        raise ValueError(f"{path.name} could not be opened as a PDF: {exc}") from exc
+        log.info("pdfplumber could not open %s (%s); falling back to pdfium", path.name, exc)
+        page_count = 0
+
+    if page_count == 0:
+        if pdf is not None:
+            pdf.close()
+        return _run_without_text_layer(
+            path,
+            meta=meta,
+            report=report,
+            settings=settings,
+            profile=profile,
+            enable_ocr=enable_ocr,
+            emit=emit,
+            started=started,
+        )
 
     try:
-        meta.n_pages = len(pdf.pages)
-        if meta.n_pages == 0:
-            raise ValueError(f"{path.name} contains no pages.")
+        meta.n_pages = page_count
         if meta.n_pages > settings.max_pages:
             meta.warnings.append(
                 f"Document has {meta.n_pages} pages; only the first "
@@ -172,6 +192,101 @@ def run(
     finally:
         pdf.close()
 
+    return _assemble(
+        tables,
+        path=path,
+        meta=meta,
+        report=report,
+        settings=settings,
+        resolved_profile=resolved_profile,
+        emit=emit,
+        started=started,
+    )
+
+
+def _run_without_text_layer(
+    path: Path,
+    *,
+    meta: DocumentMeta,
+    report: ValidationReport,
+    settings,
+    profile,
+    enable_ocr: bool,
+    emit: ProgressFn,
+    started: float,
+) -> ExtractionResult:
+    """Read a PDF that pdfplumber cannot open, using pdfium and OCR alone.
+
+    Reporting "contains no pages" for a document that a PDF reader opens
+    happily is both wrong and useless. pdfium renders these files, so every
+    page is treated as an image and put through the scanned path — which is
+    what a document with no reachable text layer needs anyway.
+    """
+    import pypdfium2 as pdfium
+
+    try:
+        document = pdfium.PdfDocument(str(path))
+        page_count = len(document)
+        close = getattr(document, "close", None)
+        if callable(close):
+            close()
+    except Exception as exc:
+        raise ValueError(
+            f"{path.name} could not be opened as a PDF by any available reader: {exc}"
+        ) from exc
+
+    if page_count == 0:
+        raise ValueError(f"{path.name} contains no pages.")
+
+    meta.n_pages = page_count
+    page_limit = min(page_count, settings.max_pages)
+    meta.page_kinds = [PageKind.SCANNED] * page_limit
+    meta.warnings.append(
+        "This PDF has no text layer that could be read directly, so every page "
+        "was processed as an image."
+    )
+
+    resolved_profile = select_profile("", requested=profile if isinstance(profile, str) else None)
+    if isinstance(profile, Profile):
+        resolved_profile = profile
+    meta.profile = resolved_profile.name
+
+    emit("routing", 0, page_limit, "No text layer; reading every page as an image")
+
+    tables = _run_scanned(
+        path,
+        list(range(page_limit)),
+        meta=meta,
+        report=report,
+        settings=settings,
+        enable_ocr=enable_ocr,
+        emit=emit,
+    )
+
+    return _assemble(
+        tables,
+        path=path,
+        meta=meta,
+        report=report,
+        settings=settings,
+        resolved_profile=resolved_profile,
+        emit=emit,
+        started=started,
+    )
+
+
+def _assemble(
+    tables: list[ExtractedTable],
+    *,
+    path: Path,
+    meta: DocumentMeta,
+    report: ValidationReport,
+    settings,
+    resolved_profile,
+    emit: ProgressFn,
+    started: float,
+) -> ExtractionResult:
+    """Stitch, normalise and validate — shared by both ways in."""
     tables.sort(key=lambda t: t.page_number)
 
     # --- Assemble ------------------------------------------------------------

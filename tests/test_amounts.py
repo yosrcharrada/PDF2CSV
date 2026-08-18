@@ -269,3 +269,18 @@ class TestInferDayfirst:
 
     def test_iso_carries_no_evidence(self):
         assert infer_dayfirst(["2025-03-04", "2025-06-05"]) is None
+
+
+class TestConcatenatedDigits:
+    """OCR runs adjacent cells together on dense tables.
+
+    The result parses as a perfectly valid float in the 1e38 range, lands in a
+    numeric column, and looks like nothing a reviewer expects — so it survives.
+    """
+
+    def test_an_absurdly_long_digit_run_is_not_an_amount(self):
+        assert parse_amount("365274688988937798751190328024881") is None
+
+    def test_amounts_up_to_a_representable_size_still_parse(self):
+        assert parse_amount("999999999999.99") == pytest.approx(999999999999.99)
+        assert parse_amount("1 234 567 890,12") == pytest.approx(1234567890.12)

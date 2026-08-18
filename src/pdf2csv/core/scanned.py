@@ -52,6 +52,7 @@ class PageScan:
     x_rules: list[float] = field(default_factory=list)
     y_rules: list[float] = field(default_factory=list)
     skew: float = 0.0
+    rotation: int = 0
     from_cache: bool = False
 
     @property
@@ -67,6 +68,7 @@ class PageScan:
             "x_rules": self.x_rules,
             "y_rules": self.y_rules,
             "skew": self.skew,
+            "rotation": self.rotation,
         }
 
     @classmethod
@@ -79,6 +81,7 @@ class PageScan:
             x_rules=payload.get("x_rules", []),
             y_rules=payload.get("y_rules", []),
             skew=payload.get("skew", 0.0),
+            rotation=payload.get("rotation", 0),
             from_cache=True,
         )
 
@@ -113,6 +116,60 @@ def render_page(document: Any, page_index: int, dpi: int) -> Any:
             close()
 
 
+
+_UPRIGHT_MIN = 0.55
+"""Fraction of boxes wider than tall for a page to be considered upright."""
+
+
+def _orient(image: Any) -> tuple[Any, int, list[Any]]:
+    """Turn a sideways page the right way up. Returns (image, degrees, boxes).
+
+    Landscape content saved on a portrait page arrives rotated a quarter turn
+    with nothing in the metadata to say so, and the text then runs down the
+    page. Every row and column this module infers from position is meaningless
+    until that is corrected.
+
+    The page is recognised upright first, and only if the text is running
+    vertically are the quarter turns tried — one recognition pass on the common
+    case, three on the awkward one.
+
+    Choosing between the two quarter turns is genuinely ambiguous: the
+    recogniser corrects upside-down text by itself, so both produce readable
+    words and differ only in whether the layout is inverted. The better
+    wide-box fraction is taken, confidence breaks a tie, and the caller is told
+    the orientation was inferred so that it can say so in the report. The
+    declaration reader resolves the same ambiguity properly, by parsing each
+    candidate and keeping whichever yields a valid result -- an option that
+    does not exist when the table's shape is unknown.
+    """
+    import cv2
+
+    def wide_fraction(boxes: list[Any]) -> float:
+        if not boxes:
+            return 0.0
+        return sum(1 for b in boxes if (b.x1 - b.x0) > (b.y1 - b.y0)) / len(boxes)
+
+    upright = ocr.recognise(image)
+    if wide_fraction(upright) >= _UPRIGHT_MIN or not upright:
+        return image, 0, upright
+
+    best = (wide_fraction(upright), 0.0, 0, image, upright)
+    for degrees, flag in ((90, cv2.ROTATE_90_CLOCKWISE), (270, cv2.ROTATE_90_COUNTERCLOCKWISE)):
+        rotated = cv2.rotate(image, flag)
+        boxes = ocr.recognise(rotated)
+        if not boxes:
+            continue
+        confidence = sum(b.confidence for b in boxes) / len(boxes)
+        candidate = (wide_fraction(boxes), confidence, degrees, rotated, boxes)
+        if candidate[:2] > best[:2]:
+            best = candidate
+
+    _, _, degrees, oriented, boxes = best
+    if degrees:
+        log.info("page appears rotated; corrected by %d degrees", degrees)
+    return oriented, degrees, boxes
+
+
 def scan_page(document: Any, page_index: int, *, dpi: int, sha256: str) -> PageScan:
     """Render, deskew, find rules and recognise one page — or reuse the cache."""
     page_number = page_index + 1
@@ -123,10 +180,14 @@ def scan_page(document: Any, page_index: int, *, dpi: int, sha256: str) -> PageS
         return PageScan.from_payload(cached)
 
     image = render_page(document, page_index, dpi)
+    # Orientation before anything positional: deskew and rule detection both
+    # assume the text runs across the page.
+    image, rotation, boxes = _orient(image)
     image, skew = grid.deskew(image)
+    if skew:
+        # Deskewing moved the pixels, so the boxes have to be found again.
+        boxes = ocr.recognise(image)
     y_rules, x_rules = grid.detect_rules(image)
-
-    boxes = ocr.recognise(image)
     log.info(
         "page %d: OCR found %d text box(es); %d horizontal / %d vertical rule(s)",
         page_number,
@@ -143,6 +204,7 @@ def scan_page(document: Any, page_index: int, *, dpi: int, sha256: str) -> PageS
         x_rules=x_rules,
         y_rules=y_rules,
         skew=skew,
+        rotation=rotation,
     )
     cache.save_page_scan(sha256, page_index, dpi, scan.to_payload())
     return scan
@@ -272,6 +334,13 @@ def extract_scanned_tables(
         scan.page_number: grid.group_rows(scan.boxes, scan.y_rules) for scan in scans
     }
     shared = _shared_boundaries(scans, rows_by_page)
+
+    rotated_pages = [s.page_number for s in scans if s.rotation]
+    if rotated_pages:
+        log.warning(
+            "page(s) %s were stored sideways; orientation was inferred",
+            rotated_pages,
+        )
 
     tables: list[ExtractedTable] = []
     for scan in scans:
