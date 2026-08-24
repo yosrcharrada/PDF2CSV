@@ -264,6 +264,27 @@ def _jsonable(value: Any) -> Any:
 # --------------------------------------------------------------------------- #
 
 
+
+def _is_plain_table(result) -> bool:
+    """Is this a transcribed table, rather than the finance team's layout?
+
+    Decides the delimiter, and the answer is taken from the columns themselves
+    rather than from the profile's name. Naming the profile was the obvious
+    test and it was wrong within a day: adding the fiche reader introduced a
+    second profile producing the same layout, the equality check missed it, and
+    every fiche exported comma-delimited. The columns cannot drift out of step
+    with the layout in that way, because they *are* the layout.
+
+    It matters because those rows hold values with commas in them --
+    ``BTKL CD 8,40% 31072027``, ``4924922,296`` -- written that way because the
+    receiving system reads a comma-decimal locale. Exported comma-delimited
+    they survive only by being quoted, which the reference files are not.
+    """
+    from pdf2csv.declarations.mapping import COLUMNS
+
+    return list(result.dataframe.columns) != list(COLUMNS)
+
+
 class JobManager:
     """Owns the job table and the worker pool."""
 
@@ -339,9 +360,7 @@ class JobManager:
             job.result = result
 
             stem = Path(job.filename).stem
-            # The finance team's reference files are semicolon-delimited,
-            # which these rows need because their values contain commas.
-            delimiter = ";" if result.meta.profile == "declaration" else ","
+            delimiter = "," if _is_plain_table(result) else ";"
             job.exports = export_result(
                 result, job.output_dir / f"{stem}.csv", delimiter=delimiter
             )

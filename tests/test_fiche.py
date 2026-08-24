@@ -346,3 +346,44 @@ class TestAWholePageTable:
         }
         assert _half_of(named) == BOTH_HALVES
         assert _half_of({0: "libelle", 1: "taux"}) is None
+
+
+class TestTheExportDelimiter:
+    """A 36-column row must be semicolon-delimited whichever reader made it.
+
+    Its values contain commas -- 'BTKL CD 8,40% 31072027', '4924922,296' --
+    because the receiving system reads a comma-decimal locale. Exported
+    comma-delimited they survive only by being quoted, and the finance team's
+    reference files are not quoted.
+
+    This is a regression test with a specific history: the delimiter used to be
+    chosen by comparing the profile's *name* to "declaration", and adding a
+    second profile that produces the same layout silently broke it.
+    """
+
+    def result_with(self, columns):
+        import pandas as pd
+
+        class Stub:
+            dataframe = pd.DataFrame([dict.fromkeys(columns, "")], columns=columns)
+
+        return Stub()
+
+    def test_the_finance_layout_is_never_comma_delimited(self):
+        from pdf2csv.declarations.mapping import COLUMNS
+        from pdf2csv.server.jobs import _is_plain_table
+
+        assert _is_plain_table(self.result_with(list(COLUMNS))) is False
+
+    def test_a_transcribed_table_stays_comma_delimited(self):
+        from pdf2csv.server.jobs import _is_plain_table
+
+        assert _is_plain_table(self.result_with(["Date", "Libelle", "Debit"])) is True
+
+    def test_the_choice_does_not_depend_on_the_profile_name(self):
+        """Any reader emitting the standard layout gets the same delimiter."""
+        from pdf2csv.declarations.mapping import COLUMNS
+        from pdf2csv.server.jobs import _is_plain_table
+
+        for _profile in ("declaration", "fiche", "something-added-later"):
+            assert _is_plain_table(self.result_with(list(COLUMNS))) is False
