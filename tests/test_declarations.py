@@ -11,6 +11,7 @@ neighbour with no separator.
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 
 import pytest
 
@@ -19,7 +20,9 @@ from pdf2csv.declarations.mapping import (
     COLUMNS,
     DeclarationFacts,
     build_name,
+    certificate_count,
     classify_type,
+    format_amount,
     format_taux,
     isin_group_key,
     issuer_from_title,
@@ -45,7 +48,7 @@ EXPECTED = {
     "issuer": "CILTTN00003",
     "rate": "8",   # not 8.0 -- the reference files write "8" and "8,4"
     "totalnumberOfCertificates": 10,
-    "totalAmountToBePaid": 0,
+    "totalAmountToBePaid": "0",
     "auctionDate": "31/07/2026",
     "type": "Discount",
     "issueDate": "31/07/2026",
@@ -60,10 +63,15 @@ EXPECTED = {
     "auctionType": "Standard",
     "BIC": "CILTTN00020",
     "code": "",
-    "nominalValueAllotted": 5000,
+    # 500 000 a certificate, which is also the montant the document prints.
+    # Checked against all four reference rows -- CIL's ten certificates are
+    # 5 000 000, and BTK Leasing's seven, two and ten are 3 500 000, 1 000 000
+    # and 5 000 000.
+    "nominalValueAllotted": "5000000",
     "numberOfCertificates": 10,
-    "amountToBePaid": 0,
-    "client": "NO",
+    "amountToBePaid": "0",
+    # As the BTK Leasing reference file spells it. The CIL file writes "no".
+    "client": "No",
     # Columns 23-36: always written, always empty, filled by the analyst.
     "clientId": "",
     "clientType": "",
@@ -161,10 +169,25 @@ class TestDerivedFields:
         )
         assert to_row(coupon, "X")["instrument"] == "certificat de deport sup 1an TF"
 
-    def test_nominal_is_500_per_certificate_not_the_printed_unit_price(self):
-        """Prix unitaire is 500 000,000 on the reference document. Deriving the
-        nominal from it would give 5 000 000, not 5 000."""
-        assert to_row(REFERENCE, "X")["nominalValueAllotted"] == 5000
+    def test_nominal_is_the_montant_the_document_prints(self):
+        """Ten certificates at 500 000 each. Both reference files agree, and an
+        earlier reading of 500 a certificate was out by a factor of a thousand
+        on every row it produced."""
+        assert to_row(REFERENCE, "X")["nominalValueAllotted"] == "5000000"
+
+    def test_certificates_come_from_the_montant_not_the_printed_quantity(self):
+        """The BTK Leasing fiche prints a quantité of 5 against a montant of
+        3 500 000 at 500 000 apiece, and its reference row says seven. Where
+        the two disagree the montant is what the finance team followed."""
+        inconsistent = replace(REFERENCE, quantite=5, montant=3500000.0)
+        assert certificate_count(inconsistent) == 7
+        assert to_row(inconsistent, "X")["numberOfCertificates"] == 7
+
+    def test_amounts_are_written_with_a_comma(self):
+        """The file is semicolon-delimited for a comma-decimal locale, where a
+        full stop is a different number. The reference writes 4924922,296."""
+        assert format_amount(4924922.296) == "4924922,296"
+        assert format_amount(3500000.0) == "3500000"
 
     def test_dates_all_come_from_the_subscription_date(self):
         """"Date actuel" is the subscription date, not the processing date.
@@ -178,10 +201,10 @@ class TestDerivedFields:
 
 
 class TestReconciliation:
-    def test_a_wrong_quantity_breaks_the_montant_check(self):
-        """The check's whole purpose: quantité scales the nominal and has no
-        other corroboration, so prix unitaire x quantité is the only evidence
-        it was read correctly."""
+    def test_a_quantity_disagreeing_with_the_montant_is_reported(self):
+        """The check's whole purpose: the mapping counts certificates from the
+        montant, so the printed quantité is the only independent evidence that
+        figure was read correctly, and a disagreement has to be visible."""
         wrong = DeclarationFacts(
             title="DECLARATION CIL 49-2026",
             taux=8.0,
@@ -192,7 +215,7 @@ class TestReconciliation:
             montant=5000000.000,
         )
         checks = {c["id"]: c["passed"] for c in reconcile(wrong)}
-        assert checks["montant"] is False
+        assert checks["quantite_matches_montant"] is False
 
     def test_reversed_dates_are_caught(self):
         reversed_ = DeclarationFacts(

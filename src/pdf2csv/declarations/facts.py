@@ -337,7 +337,11 @@ def extract_from_boxes(reading: PageReading, title_hint: str = "") -> Declaratio
         return None
 
     anchors = build_anchors(boxes)
-    row_gap = (reading.height or 1650.0) * 0.10
+    # A tenth of the page. Falls back to the extent of the text itself
+    # rather than an assumed page size, so nothing here presumes A4 or a
+    # particular scanning resolution.
+    page_height = reading.height or (max((b.y1 for b in boxes), default=0.0) or 1.0)
+    row_gap = page_height * 0.10
 
     def read(key: str) -> tuple[str, float]:
         anchor = anchors.get(key)

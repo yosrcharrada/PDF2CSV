@@ -7,7 +7,8 @@ that. Their structure is fixed and known in advance, and the CSV is not a
 transcription of the table — it is a **derived row in a schema the document
 never mentions**.
 
-Only five facts come out of the PDF:
+From a declaration, only five facts come out of the PDF. A fiche adds the
+subscriber's identity and repeats the whole set once per row:
 
 | Fact | Where | Feeds |
 |---|---|---|
@@ -36,14 +37,17 @@ survives a 200 DPI scan comfortably.
 
 | Piece | State |
 |---|---|
-| `declarations/mapping.py` — fields 2–22 | **Done.** Reproduces the reference row exactly |
-| `declarations/facts.py` — OCR the five facts | **Done** for single-declaration documents |
-| Reference case, end to end from the scan | **Verified.** All 22 fields, all 4 checks |
-| ISIN allocation | **Done.** The workbook ships with the project and is found automatically |
-| Multi-row *Billet de Trésorerie* documents | **Not supported** — see below |
-| UI | **Done.** Dropping a declaration in the browser produces the row |
+| `declarations/mapping.py` — fields 2–22 | **Done.** Reproduces both reference files |
+| `declarations/facts.py` — one declaration a page | **Done** |
+| `declarations/fiche.py` — many subscribers, columns across pages | **Done** |
+| CIL declaration, end to end from the scan | **Verified.** Every field |
+| BTK Leasing fiche, end to end from the scan | **Verified.** Every field but the three needing an account number |
+| Subscriber columns 23–36 | **Filled** where the document names a subscriber |
+| ISIN allocation and grouping | **Done.** Co-subscribers to one issuance share one code |
+| UI | **Done.** Both document kinds go in the same box |
 
-36 tests cover this subpackage. None of them use a client PDF. The ISIN
+55 tests cover this subpackage. None of them use a client PDF: the fiche
+reader's grid work is tested against a table the test itself draws. The ISIN
 workbook is committed deliberately — see below — and is the only client file in
 the repository.
 
@@ -88,7 +92,10 @@ pypdfium2, which costs nothing since these are scans with no text layer.
 |---|---|
 | BIC by **prefix rule**: CIL → `CILTTN00020` | The source SWIFT table has its code column sorted alphabetically while the name column keeps document order, so only BTK Leasing and Tunisie Leasing line up. Taken literally it gives CIL `BHLSTN00020`. Confirmed. |
 | "Date actuel" = **date de souscription** | Confirmed. This is what makes the mapping a pure function — a processing-date reading would produce a different row on reprocessing. |
-| `nominal` = **500 × quantité**, hardcoded | Confirmed. Not derived from prix unitaire, which is 500 000,000 and would give 5 000 000. |
+| `nominalValueAllotted` = **the montant printed** | Confirmed against all four reference rows. An earlier reading of 500 × quantité was out by a factor of a thousand on every row; the face value is 500 000, which is also the prix unitaire the documents print. |
+| `numberOfCertificates` = **montant ÷ prix unitaire** | The only rule all four reference rows agree with. The fiche prints a quantité of 5 against a montant of 3 500 000 at 500 000 each, and its reference row says seven — the document contradicts itself, and the finance team followed the montant. |
+| `auctionDate`/`issueDate`/`startDate` = **the date the document is dated** | Settled by the fiche: two of its rows are subscribed on 31/07 and one on 03/08, yet all three carry 03/08, the date the fiche was drawn. On the CIL declaration the two coincide, which is why a souscription reading looked correct there. |
+| `entitlementDate` = **the date de souscription**, per row | Stays with the subscription while the three above move to the document date. Both reference files agree. |
 | Multi-client grouping = same issuer + taux + both dates | The source phrasing compares souscription to remboursement, which cannot be the intent — they are never equal. |
 | `deport` spelling kept as printed | If the downstream system string-matches, "correcting" it breaks every Coupon row while looking like an improvement. |
 
@@ -124,32 +131,83 @@ concrete consequence, so none is cosmetic.
 
 | # | Question | Consequence if wrong / missing |
 |---|---|---|
-| 1 | **`code`** — the subscriber's RIB. It also determines `BIC`, and appears nowhere in the declaration PDF | Two columns cannot be produced at all |
-| 2 | **`nominalValueAllotted`** — confirmed as 500 × quantity, but all four reference rows show 500 000 × quantity | Every row is out by a factor of 1000 |
-| 3 | **`auctionDate`** — the subscription date on the CIL row, the fiche date on the BTK rows | Three date columns |
-| 4 | **`amountToBePaid`** — zero on two BTK rows, Montant Net on the third | Silent, and looks ordinary either way |
-| 5 | `startDate `, `guarantor `, `entitlement Date` carry stray spaces in `TCN CIL.csv` but not in the BTKL file | Header mismatch on import. The clean spelling is used |
-| 6 | Title tokens for the **seven non-CIL issuers** | Only CIL is confirmed; the rest are inferred from code prefixes. A wrong token silently attributes a row to another company |
-| 7 | `client` is `no` in one reference file and `No` in the other | String-matched downstream |
-| 8 | BH Leasing issuer code ends **`00004`** where all others end `00003` | Affects every BHL row, and nothing else would reveal it |
-| 9 | `certificat de **deport** sup 1an TF` — typo, or load-bearing? | Affects every Coupon row |
+| 1 | **`code`** — the subscriber's securities account. Printed in neither document | Three columns. The only one that blocks a complete row — see below |
+| 2 | `startDate `, `guarantor `, `entitlement Date` carry stray spaces in `TCN CIL.csv` but not in the BTKL file | Header mismatch on import. The clean spelling is used |
+| 3 | Title tokens for the **six unconfirmed issuers** | CIL and BTK Leasing are confirmed against real documents; the rest are inferred from code prefixes. A wrong token silently attributes a row to another company |
+| 4 | `client` is `no` in one reference file and `No` in the other | String-matched downstream. `No` is written, matching the BTK Leasing file |
+| 5 | Should columns 23–36 be **filled or blank** when the document names a subscriber? | They are filled, as asked. The finance team's own reference file for that document leaves them empty |
+| 6 | BH Leasing issuer code ends **`00004`** where all others end `00003` | Affects every BHL row, and nothing else would reveal it |
+| 7 | `certificat de **deport** sup 1an TF` — typo, or load-bearing? | Affects every Coupon row |
+
+### Why `code` cannot be derived, and what it drags with it
+
+It is the subscriber's securities account, and it decides two further columns:
+
+| Row | `code` | `BIC` | `amountToBePaid` |
+|---|---|---|---|
+| CIL | `TN31`**`CILT`**`0201021LFIN12364001` | `CILTTN00020` | 0 |
+| BTKL 1 | `TN50`**`AILE`**`0201021P00142218001` | `AILETN00020` | 0 |
+| BTKL 2 | `TN80`**`AILE`**`0201021P00142217001` | `AILETN00020` | 0 |
+| BTKL 3 | `TN62`**`UBCI`**`0201004LFIN09678001` | `UBCITNTT020` | 4 924 922,296 |
+
+The four letters after the check digits are the custodian, `BIC` follows from
+them, and the amount is zero exactly where the subscriber holds with the
+issuing company itself. All three columns are therefore one fact — and that
+fact is printed in neither the declaration nor the fiche.
+
+What is written is the issuer's own BIC, an empty `code` and a zero amount:
+right for three of the four reference rows, wrong for a subscriber banking
+elsewhere, and reported as a check on every run rather than assumed.
 
 ---
 
-## Not supported: multi-row *Billet de Trésorerie* documents
+## The fiche du souscripteur
 
-The second sample (`FICHE SOUSCRIPTEUR`) is a **different document class**, not a
-harder version of the first:
+A `FICHE SOUSCRIPTEUR` is a different document class from a declaration, not a
+harder version of one, and three of its properties drove the reader.
 
-- no `DECLARATION` title — it is headed by the issuer's name
-- **several instruments per page**, one row each, not one declaration per page
-- extra columns with no mapping rule supplied: `NOMBRE DE JOURS`, `Intérêt Brut`,
-  `Retenue à la source`, `Intérêt Net`, `Montant Net`
-- libellés encode the instrument differently: `SERBTKL8.40%CD31072026`
+**The table is split across pages by column.** Page one holds the subscriber's
+identity, page two the instrument, and a row is the two halves at the same
+position joined together. Nothing in either half says which row of the other it
+belongs to — only the ordering does. That is the opposite of the continuation
+in `core/stitch.py`, where a page adds rows to a fixed set of columns.
 
-It is correctly rejected rather than half-read, which is the right failure: a
-partially understood financial document is worse than one that says it was not
-understood.
+Because only ordering relates them, halves of different heights are refused
+rather than paired up: a subscriber against the wrong instrument produces a row
+that looks entirely ordinary and is wrong about who bought what.
 
-Supporting it needs a decision on whether each table row becomes its own
-standard row, and what the interest columns map to — if anything.
+**The pages are tilted about three degrees.** Invisible to a reader and fatal to
+row grouping — a row's text drifts roughly a hundred pixels across the page
+while the rows themselves are only eighty apart, so grouping by height alone
+interleaves them. Every page is deskewed before recognition.
+
+**Columns come from the printed ruling lines, not the headings.** A rule is a
+single unambiguous x; a heading wraps onto two lines, merges with its
+neighbour, or sits anywhere within its cell. On the sample the rules give the
+twelve instrument columns and the seven identity ones exactly — including the
+blank spacer column that also appears in the finance team's own spreadsheet.
+
+Two smaller problems needed answers:
+
+- The recogniser **runs neighbouring cells together**: `TUNISIENNE` and
+  `CARTE D'IDENTITE` arrive as one box. Cutting the string proportionally lands
+  mid-word — `TUNISIENNECA` — so the cell is re-read from its own pixels,
+  cut at the ruling line, where no such mistake is possible.
+- It **closes up the spaces in printed capitals**, so a name arrives as
+  `SELMAELLOUMIREKIK`. At twice the size it reads them as written, which is why
+  the identity columns are re-read enlarged. This is the deliberate exception to
+  the warning in `core/ocr.py` against per-cell recognition: that warning is
+  about losing context across a whole page of cells, and here the enlargement
+  buys back more than the lost context costs.
+
+Headings are matched approximately as well as exactly. Recognition of a heading
+is not reliable enough to demand a literal match — real failures include a
+clipped ending and an `l` read for an `i` — and a lost column is not a visible
+failure but a row carrying a plausible wrong value. The threshold is set so that
+`remboursement` can never answer for `souscription`, the one confusion that
+would matter.
+
+**The interest columns are read and unused.** `NOMBRE DE JOURS`, `Intérêt Brut`,
+`Retenue à la source` and `Intérêt Net` have no column in the standard layout,
+in the same way prix unitaire and montant have none on a declaration. They are
+read for reconciliation, not exported.

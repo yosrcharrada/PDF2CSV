@@ -450,18 +450,19 @@ def command_declare(args: argparse.Namespace) -> int:
 
     if pool is None:
         print(
-            "\n  Note: no --isin-pool was given, so the ISIN column is empty.\n"
-            "  Pass --isin-pool \"block d ISIN.xlsx\" to allocate one."
+            "\n  Note: no ISIN workbook was found, so the ISIN column is empty.\n"
+            "  Put the workbook in the isin/ folder, or pass --isin-pool."
         )
 
     print(
         # ASCII only. A Windows console may be running any codepage, and a
         # mojibake note is a note nobody reads.
-        "\n  Note: this writes the 22 confirmed fields; the finance team's\n"
-        "  reference files use 36. Four rules are still unresolved:\n"
-        "    auctionDate, code, amountToBePaid, and nominal -\n"
-        "    your answer said 500 x quantity, but all four reference rows\n"
-        "    show 500 000 x quantity (i.e. the montant).\n"
+        "\n  Note: all 36 columns are written. One column cannot be taken\n"
+        "  from the document at all:\n"
+        "    code - the subscriber's securities account. BIC and\n"
+        "    amountToBePaid follow from it, so both fall back to the\n"
+        "    issuer's own settlement, which is what three of the four\n"
+        "    reference rows show.\n"
         "  See docs/DECLARATIONS.md.\n"
     )
     return 0 if failed == 0 else 1
@@ -503,7 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
     declare.add_argument("pdf")
     declare.add_argument("-o", "--output", help="destination CSV")
     declare.add_argument(
-        "--isin-pool", help="the 'block d ISIN' workbook; omit to leave ISIN empty"
+        "--isin-pool",
+        help="ISIN workbook; omit to use the one in isin/",
     )
     declare.add_argument("--ledger", help="allocation ledger (default: alongside the logs)")
     declare.add_argument(

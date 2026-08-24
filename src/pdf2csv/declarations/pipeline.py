@@ -15,6 +15,7 @@ has no text layer at all, and so might be) is put through OCR.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -24,7 +25,16 @@ import pandas as pd
 from pdf2csv.config import get_settings
 from pdf2csv.core import cache
 from pdf2csv.declarations.facts import extract_declarations
-from pdf2csv.declarations.mapping import COLUMNS, DeclarationFacts, reconcile, to_row
+from pdf2csv.declarations.mapping import (
+    COLUMNS,
+    DeclarationFacts,
+    GroupTotals,
+    amount_to_be_paid,
+    certificate_count,
+    isin_group_key,
+    reconcile,
+    to_row,
+)
 from pdf2csv.logging_setup import get_logger
 from pdf2csv.models import (
     DocumentMeta,
@@ -41,6 +51,7 @@ log = get_logger(__name__)
 __all__ = ["looks_like_declaration", "run_declaration"]
 
 ProgressFn = Callable[[str, int, int, str], None]
+ProgressFn2 = Callable[[int, int, str], None]
 
 _MARKERS = ("DECLARATION", "CERTIFICAT DE D", "FICHE DU SOUSCRIPTEUR")
 
@@ -96,9 +107,7 @@ def run_declaration(
     def relay(current: int, total: int, message: str) -> None:
         emit("ocr", current, total, message)
 
-    facts_list = extract_declarations(
-        str(path), dpi=dpi or 200, progress=relay
-    )
+    facts_list = _read(path, dpi=dpi or 200, relay=relay)
     if not facts_list:
         return None
 
@@ -109,9 +118,37 @@ def run_declaration(
 
     allocator = _Allocator.create(isin_pool)
 
+    # Rows describing one issuance share a single ISIN and a single pair of
+    # totals, so the allocation and the totals are computed per group and not
+    # per row. A single-subscriber declaration is the degenerate case of one
+    # group of one, and comes out unchanged.
+    groups: dict[tuple, list[DeclarationFacts]] = {}
     for facts in facts_list:
-        isin, note = allocator.allocate(facts, report)
-        rows.append(to_row(facts, isin=isin))
+        groups.setdefault(isin_group_key(facts), []).append(facts)
+
+    totals_for: dict[tuple, GroupTotals] = {
+        key: GroupTotals(
+            certificates=sum(certificate_count(f) for f in members),
+            amount_to_be_paid=sum(amount_to_be_paid(f) for f in members),
+        )
+        for key, members in groups.items()
+    }
+    isin_for: dict[tuple, str] = {}
+
+    for facts in facts_list:
+        key = isin_group_key(facts)
+        if key not in isin_for:
+            isin_for[key], note = allocator.allocate(facts, report)
+            if note:
+                log.info("%s", note)
+        rows.append(
+            to_row(
+                facts,
+                isin=isin_for[key],
+                totals=totals_for[key],
+                tag=_instrument_tag(facts),
+            )
+        )
 
         for check in reconcile(facts):
             report.add(
@@ -126,10 +163,8 @@ def run_declaration(
                     else "Compare this against the printed document before using the row."
                 ),
             )
-        if note:
-            log.info("%s", note)
-
     frame = pd.DataFrame(rows, columns=COLUMNS)
+    pages = max((f.page_count for f in facts_list), default=1)
 
     report.add(
         "declaration_read",
@@ -141,16 +176,16 @@ def run_declaration(
             f"read with {min(f.confidence for f in facts_list):.0%} confidence."
         ),
     )
-    _note_unresolved(report)
+    _note_unresolved(report, rows)
 
     meta = DocumentMeta(
         source_path=str(path),
         source_name=path.name,
         sha256=cache.file_sha256(path),
         size_bytes=path.stat().st_size,
-        n_pages=len(facts_list),
-        page_kinds=[PageKind.SCANNED] * len(facts_list),
-        profile="declaration",
+        n_pages=pages,
+        page_kinds=[PageKind.SCANNED] * pages,
+        profile="fiche" if len(facts_list) > 1 or facts_list[0].subscriber else "declaration",
         duration_seconds=time.perf_counter() - started,
         ocr_available=True,
     )
@@ -176,25 +211,108 @@ def run_declaration(
     )
 
 
-def _note_unresolved(report: ValidationReport) -> None:
-    """Say plainly which columns are not yet trustworthy.
+def _instrument_tag(facts: DeclarationFacts) -> str:
+    """``'CD'`` where the document names the instrument, otherwise nothing.
 
-    Four mapping rules are still unconfirmed, and three of them produce a value
-    that looks perfectly ordinary while being wrong. Saying so on every run is
-    the only thing standing between that and someone filing the output.
+    Field 2 carries the tag exactly when the source does: a fiche libelle reads
+    ``SER BTKL 8.40% CD 31072026`` and its reference row keeps the ``CD``,
+    while the CIL declaration names no instrument and its reference row has
+    none. Reading it from the document reproduces both.
+    """
+    # Matched without relying on spaces: the recogniser returns the libelle
+    # closed up, as "SERBTKL8.40%CD31072026", so a word-boundary search finds
+    # nothing. Letters either side are excluded so that the CD of some longer
+    # word cannot be mistaken for the tag.
+    return "CD" if re.search(r"(?<![A-Z])CD(?![A-Z])", facts.libelle.upper()) else ""
+
+
+def _read(path: Path, *, dpi: int, relay: ProgressFn2) -> list[DeclarationFacts]:
+    """Read the document with whichever reader suits it, trying both.
+
+    A fiche and a declaration cannot be told apart by their subject matter --
+    both are certificates of deposit, and a declaration contains a block headed
+    *fiche du souscripteur*. What separates them is that a declaration is
+    titled ``DECLARATION`` and a fiche is not, so that is what picks the reader
+    to try first.
+
+    Both are tried either way. Choosing wrongly then costs a second recognition
+    pass and never costs a wrong answer, which is the right way round: the
+    documents come from outside and the cheap signal will eventually be wrong.
+    """
+    from pdf2csv.declarations.fiche import read_fiche
+
+    def as_fiche() -> list[DeclarationFacts]:
+        return read_fiche(path, dpi=dpi, progress=lambda c, t, m: relay(c, t, m))
+
+    def as_declaration() -> list[DeclarationFacts]:
+        return extract_declarations(str(path), dpi=dpi, progress=relay)
+
+    first, second = (
+        (as_declaration, as_fiche)
+        if _titled_declaration(path)
+        else (as_fiche, as_declaration)
+    )
+    found = first()
+    return found if found else second()
+
+
+def _titled_declaration(path: Path) -> bool:
+    """Does the text layer, if there is one, call this a declaration?
+
+    Scans have no text layer and answer ``False``, which sends them to the
+    fiche reader first. That is the right default: the fiche reader recognises
+    a ruled table with known headings and declines quickly on anything else,
+    whereas the declaration reader accepts a much looser page.
+    """
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(str(path)) as pdf:
+            if not pdf.pages:
+                return False
+            text = " ".join((page.extract_text() or "") for page in pdf.pages[:2])
+    except Exception:
+        return False
+    return "DECLARATION" in text.upper()
+
+
+def _note_unresolved(report: ValidationReport, rows: list[dict]) -> None:
+    """Say plainly which columns this document could not supply.
+
+    Reported as checks rather than left to the documentation, because both are
+    columns that look perfectly ordinary while being incomplete, and a row is
+    filed by whoever is looking at this screen.
     """
     report.add(
-        "mapping_incomplete",
-        "Some columns are not final yet",
+        "settlement_account",
+        "The settlement account is not in this document",
         False,
         severity=Severity.WARNING,
         detail=(
-            "code and BIC come from the subscriber's account, which is not in "
-            "this PDF; nominal, auctionDate and amountToBePaid are still being "
-            "confirmed against the finance team's reference files."
+            "code is the subscriber's securities account and is printed "
+            "nowhere in a declaration or a fiche, so it is left empty. BIC "
+            "follows from it and defaults to the issuer's own, which is right "
+            "wherever the subscriber holds with the issuer -- three of the "
+            "four reference rows -- and wrong for a subscriber banking "
+            "elsewhere. amountToBePaid is zero for the same reason."
         ),
-        hint="Check those columns by hand until the rules are confirmed.",
+        hint="Fill code, and check BIC and amountToBePaid, from the subscriber's account.",
     )
+
+    identified = sum(1 for row in rows if row.get("nationalId") or row.get("lastName"))
+    if identified:
+        report.add(
+            "subscriber_columns_filled",
+            "The subscriber columns were filled from the document",
+            True,
+            severity=Severity.INFO,
+            detail=(
+                f"{count(identified, 'row')} carried a named subscriber, so "
+                "columns 23-36 were written from it. The finance team's own "
+                "reference file leaves those columns empty."
+            ),
+            hint="Clear them if the receiving system expects them blank.",
+        )
 
 
 class _Allocator:
@@ -233,7 +351,7 @@ class _Allocator:
                 False,
                 severity=Severity.WARNING,
                 detail="No ISIN workbook is configured, so this column is empty.",
-                hint="Set PDF2CSV_ISIN_POOL to the 'block d ISIN' workbook to allocate codes.",
+                hint="Put the ISIN workbook in the isin/ folder, or set PDF2CSV_ISIN_POOL.",
             )
             return "", ""
 

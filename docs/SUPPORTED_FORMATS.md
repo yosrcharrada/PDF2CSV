@@ -91,6 +91,27 @@ result — not a crash, and not a fictional one-column table built out of prose.
 
 *Fixture:* `letter_no_table.pdf`
 
+### Certificat de dépôt declarations and fiches
+
+Two fixed-layout financial documents, handled by a separate reader that maps
+them into the finance team's 36-column layout rather than transcribing their
+tables. Both are scans with no text layer.
+
+| | Declaration | Fiche du souscripteur |
+|---|---|---|
+| Rows out | One | One per subscriber |
+| Table layout | Labels and values | A ruled grid, columns split across two pages |
+| Subscriber columns 23–36 | Empty | Filled from the document |
+| Quarter-turn rotation | Resolved by parsing | Resolved by parsing |
+| Page tilt | Corrected | Corrected |
+
+Both are dropped in the same box as anything else; the reader is chosen from
+the document. Anything it does not recognise falls back to ordinary table
+extraction, so a wrong guess costs time and never correctness.
+
+Full detail, including the four mapping rules confirmed against the reference
+files and the one column that cannot be derived: **[DECLARATIONS.md](DECLARATIONS.md)**.
+
 ---
 
 ## Not supported
@@ -105,7 +126,7 @@ result — not a crash, and not a fictional one-column table built out of prose.
 | **Charts and images as data** | Only tabular text is extracted. |
 | **Nested or multi-level headers** | Two-row stacked headers work on ruled tables; three levels do not. |
 | **Cells spanning multiple columns** | Merged cells are extracted but their span is not reconstructed. |
-| **Rotated or landscape-in-portrait pages** | Deskew corrects tilt up to 15°, not 90° rotation. |
+| **Rotated pages, in generic table extraction** | Deskew corrects tilt up to 15°, not a quarter turn. The declaration and fiche readers *do* resolve quarter turns — see below. |
 | **Batch or folder processing** | One file at a time. Batches need a job queue. |
 
 ### Degrades rather than fails
