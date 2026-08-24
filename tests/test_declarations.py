@@ -17,7 +17,9 @@ import pytest
 
 from pdf2csv.declarations.facts import PageReading, build_anchors, extract_from_boxes
 from pdf2csv.declarations.mapping import (
+    ALL_COLUMNS,
     COLUMNS,
+    SOURCE_COLUMNS,
     DeclarationFacts,
     build_name,
     certificate_count,
@@ -93,13 +95,40 @@ EXPECTED = {
 class TestReferenceCase:
     def test_every_field_matches(self):
         row = to_row(REFERENCE, isin="TNEDPD3F01J5")
-        assert row == EXPECTED
+        assert {key: row[key] for key in COLUMNS} == EXPECTED
 
     def test_column_order_is_fixed(self):
         """The CSV is consumed by another system; column order is part of the
         contract, not a presentation detail."""
-        assert list(to_row(REFERENCE, isin="X")) == COLUMNS
+        assert list(to_row(REFERENCE, isin="X"))[:36] == COLUMNS
         assert len(COLUMNS) == 36
+
+    def test_the_standard_columns_come_first_and_alone(self):
+        """The source columns are appended, never interleaved.
+
+        Whatever imports this reads the first 36 by position, so a source
+        column appearing among them would shift every field after it."""
+        row = to_row(REFERENCE, isin="X")
+        assert list(row) == ALL_COLUMNS
+        assert not set(SOURCE_COLUMNS) & set(COLUMNS)
+
+    def test_the_document_own_figures_are_kept(self):
+        """A value read and then dropped is unauditable: nobody looking at the
+        CSV can tell what the paper said. The taux and the montant are folded
+        into derived fields, so they are also carried as printed."""
+        row = to_row(REFERENCE, isin="X")
+        assert row["Taux"] == "8,00%"
+        assert row["Montant"] == "5000000"
+        assert row["Quantite"] == "10"
+        assert row["Date de remboursement"] == "09/09/2026"
+
+    def test_a_column_the_document_lacks_is_present_and_empty(self):
+        """Every row has the same shape whichever reader produced it, so a
+        declaration still carries the fiche's columns, blank."""
+        row = to_row(REFERENCE, isin="X")
+        assert row["Interet brut"] == ""
+        assert row["Libelle"] == ""
+        assert all(column in row for column in SOURCE_COLUMNS)
 
     def test_reconciliation_passes(self):
         assert all(c["passed"] for c in reconcile(REFERENCE))
@@ -352,7 +381,8 @@ class TestExtraction:
         """End to end from recognised text, without any PDF."""
         facts = extract_from_boxes(reference_page())
         assert facts is not None
-        assert to_row(facts, "TNEDPD3F01J5") == EXPECTED
+        row = to_row(facts, "TNEDPD3F01J5")
+        assert {key: row[key] for key in COLUMNS} == EXPECTED
 
     def test_a_page_without_a_declaration_returns_none(self):
         blank = PageReading(page_number=1, rotation=0, width=2337, height=1650,

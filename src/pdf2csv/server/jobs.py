@@ -282,7 +282,11 @@ def _is_plain_table(result) -> bool:
     """
     from pdf2csv.declarations.mapping import COLUMNS
 
-    return list(result.dataframe.columns) != list(COLUMNS)
+    # Containment, not equality. The standard columns are followed by the
+    # source columns the document printed, and an equality check would have
+    # broken again the moment those were added -- which is exactly how this
+    # went wrong the first time.
+    return not set(COLUMNS).issubset(result.dataframe.columns)
 
 
 class JobManager:

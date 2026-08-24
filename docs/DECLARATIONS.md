@@ -101,6 +101,59 @@ pypdfium2, which costs nothing since these are scans with no text layer.
 
 ---
 
+## The document's own columns are kept
+
+The 36 columns are a derived row, not a transcription, and three of them fold
+several printed values into one:
+
+- `name` is `BTKL CD 8,40% 31072027` — the instrument *and* the rate, exactly as
+  the reference files write it
+- `rate` is `8,4`, normalised out of a printed `8.40%`
+- `numberOfCertificates` is computed from the montant, and disagrees with the
+  printed quantité on one real row
+
+Read literally that means a document can state a libellé, a taux, a montant and
+a quantité and have none of them appear anywhere in the output as the document
+wrote them. A value read and then dropped is unauditable: nobody looking at the
+CSV can tell what the paper said.
+
+So every source column is **appended after the 36**:
+
+| | |
+|---|---|
+| 37–43 | `Libelle`, `Taux`, `Prix unitaire`, `Montant`, `Quantite`, `Date de souscription`, `Date de remboursement` |
+| 44–48 | `Nombre de jours`, `Interet brut`, `Retenue a la source`, `Interet net`, `Montant net` |
+| 49–50 | `Adresse`, `Restriction` |
+
+Three rules govern them:
+
+**Appended, never interleaved.** The first 36 columns stay byte-identical to the
+reference files, in their order and spelling. Whatever imports this reads them
+by position, so a source column appearing among them would shift every field
+after it.
+
+**Always present, blank where the document has none.** A declaration prints no
+interest columns; it still carries them, empty. Every row has the same shape
+whichever reader produced it, so the file can be imported without knowing which
+kind of document it came from.
+
+**As the document stated them.** The printed `Quantite` is kept beside the
+derived `numberOfCertificates` precisely because the two disagree on the BTK
+Leasing fiche — 5 against 7. That is the pair that makes the contradiction
+visible in the file itself rather than only in a check on screen.
+
+Amounts are re-punctuated into the comma-decimal convention the rest of the file
+uses, since the recogniser returns them with a full stop and the file is read in
+a locale where that is a different number. A figure that will not parse is
+carried through unchanged rather than dropped — an odd-looking cell is
+answerable, a missing one is not.
+
+> **If the receiving system rejects a 50-column file**, the first 36 are
+> unchanged and in order, so trimming the rest is a safe operation. Say so and
+> the extra columns can be made optional.
+
+---
+
 ## The ISIN pool is distributed — and the ledger is not
 
 The workbook ships with the project, so a clone allocates real codes with no

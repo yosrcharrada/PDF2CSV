@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 __all__ = [
+    "ALL_COLUMNS",
     "COLUMNS",
     "ISSUERS",
+    "SOURCE_COLUMNS",
     "DeclarationFacts",
     "GroupTotals",
     "Issuer",
@@ -201,6 +203,43 @@ COLUMNS = [
 
 assert len(COLUMNS) == 36
 
+# Columns the source document prints that the standard layout has no home for.
+#
+# Field 2 folds the instrument and the rate into one string -- the reference
+# files write "BTKL CD 8,40% 31072027" -- and fields 19 to 21 are derived, not
+# transcribed. Read literally that means a document can state a libelle, a
+# taux, a montant and a quantite and have none of them appear anywhere in the
+# output as the document wrote them. Anything read and then dropped is
+# unauditable: nobody looking at the CSV can tell what the paper said.
+#
+# So they are appended, after the 36 and never among them. The first 36 columns
+# stay byte-identical to the reference files, which is the part that is a
+# contract with the receiving system; these carry what the document actually
+# printed. A column stays empty where its document has no such column, rather
+# than being omitted, so every row of every kind has the same shape.
+#
+# Spelled without accents, following the reference files' own
+# "certificat de depot inf 1an TF".
+SOURCE_COLUMNS = [
+    "Libelle",
+    "Taux",
+    "Prix unitaire",
+    "Montant",
+    "Quantite",
+    "Date de souscription",
+    "Date de remboursement",
+    "Nombre de jours",
+    "Interet brut",
+    "Retenue a la source",
+    "Interet net",
+    "Montant net",
+    "Adresse",
+    "Restriction",
+]
+
+ALL_COLUMNS = [*COLUMNS, *SOURCE_COLUMNS]
+"""What is actually written: the contract, then the evidence for it."""
+
 
 # --------------------------------------------------------------------------- #
 # Facts
@@ -286,6 +325,14 @@ class DeclarationFacts:
 
     subscriber: Subscriber | None = None
     """Identity of the subscriber, where the document carries it."""
+
+    extras: dict[str, str] = field(default_factory=dict)
+    """Source columns as printed, keyed by their heading in ``SOURCE_COLUMNS``.
+
+    Only for columns that cannot be derived from the facts above -- the
+    interest columns of a fiche, its address and restriction. Everything else
+    is filled in by :func:`to_row` from the facts themselves, so a document
+    that states fewer columns simply leaves those blank."""
 
     source_page: int = 1
     page_count: int = 1
@@ -526,6 +573,38 @@ def to_row(
         "fiscalId": "",
         "gender": "",
         "investorType": "",
+        # Columns 37 onward: what the document printed, so the derived values
+        # above can be checked against it without going back to the PDF.
+        **_source_columns(facts),
+    }
+
+
+def _source_columns(facts: DeclarationFacts) -> dict[str, str]:
+    """The document's own columns, derived where possible and carried where not.
+
+    Deriving the common ones from the facts rather than requiring every reader
+    to supply them means a declaration -- which prints a taux, a montant and a
+    quantite but no libelle -- fills in what it has and leaves the rest blank,
+    without the reader knowing anything about this list.
+    """
+    def money(value: float | None) -> str:
+        return format_amount(value) if value is not None else ""
+
+    derived = {
+        "Libelle": facts.libelle,
+        "Taux": format_taux(facts.taux),
+        "Prix unitaire": money(facts.prix_unitaire),
+        "Montant": money(facts.montant),
+        # The quantite *as printed*, which is not always the number of
+        # certificates: the BTK Leasing fiche prints 5 where the montant makes
+        # 7. Keeping both is the whole point of these columns.
+        "Quantite": str(facts.quantite),
+        "Date de souscription": facts.date_souscription.strftime("%d/%m/%Y"),
+        "Date de remboursement": facts.date_remboursement.strftime("%d/%m/%Y"),
+    }
+    return {
+        column: str(facts.extras.get(column, derived.get(column, "")) or "")
+        for column in SOURCE_COLUMNS
     }
 
 

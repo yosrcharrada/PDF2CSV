@@ -26,7 +26,7 @@ from pdf2csv.config import get_settings
 from pdf2csv.core import cache
 from pdf2csv.declarations.facts import extract_declarations
 from pdf2csv.declarations.mapping import (
-    COLUMNS,
+    ALL_COLUMNS,
     DeclarationFacts,
     GroupTotals,
     amount_to_be_paid,
@@ -163,7 +163,7 @@ def run_declaration(
                     else "Compare this against the printed document before using the row."
                 ),
             )
-    frame = pd.DataFrame(rows, columns=COLUMNS)
+    frame = pd.DataFrame(rows, columns=ALL_COLUMNS)
     pages = max((f.page_count for f in facts_list), default=1)
 
     report.add(

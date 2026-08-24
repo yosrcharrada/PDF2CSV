@@ -41,7 +41,11 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from pdf2csv.core import grid, ocr
-from pdf2csv.declarations.mapping import DeclarationFacts, Subscriber
+from pdf2csv.declarations.mapping import (
+    DeclarationFacts,
+    Subscriber,
+    format_amount,
+)
 from pdf2csv.logging_setup import get_logger
 from pdf2csv.models import TextBox
 
@@ -190,15 +194,19 @@ _MAGNIFY = 2
 # Columns whose value is prose rather than a figure, and so are always re-read.
 # A digit is recognised correctly either way, but a name or a client type is
 # written into the CSV with its spacing visible.
-# The address is deliberately absent: the standard layout has no column for it,
-# so re-reading it would cost a recognition pass per row to improve a value
-# nothing consumes.
 _PROSE = frozenset(
     {
         "subscriber_name",
         "client_type",
         "nationality",
         "nature_of_identification",
+        # Both of these are written into the CSV as the document states them,
+        # so their word spacing is visible to whoever reads it. The libelle in
+        # particular is the document's own name for the instrument -- closed up
+        # to "SERBTKL8.40%CD31072026" it is a good deal harder to check against
+        # the paper than "SER BTKL 8.40% CD 31072026".
+        "libelle",
+        "address",
     }
 )
 
@@ -905,10 +913,51 @@ def _facts_from_row(
         montant=montant,
         document_date=drawn,
         subscriber=subscriber,
+        extras=_source_values(row, identity),
         source_page=page,
         libelle=libelle,
         confidence=confidence,
     )
+
+
+# Columns a fiche prints that nothing in the standard layout derives, mapped
+# onto the headings they are exported under.
+_CARRIED = {
+    "days": "Nombre de jours",
+    "interet_brut": "Interet brut",
+    "retenue": "Retenue a la source",
+    "interet_net": "Interet net",
+    "montant_net": "Montant net",
+}
+_CARRIED_IDENTITY = {
+    "address": "Adresse",
+    "restriction": "Restriction",
+}
+
+
+def _source_values(row: dict[str, str], identity: dict[str, str]) -> dict[str, str]:
+    """The fiche's own columns, kept as the document stated them.
+
+    The interest figures are re-punctuated into the comma-decimal convention
+    the rest of the file is written in, because the recogniser returns them
+    with a full stop and the file is read in a locale where that is a
+    different number. A value that will not parse is carried through
+    unchanged rather than dropped -- an odd-looking cell is answerable, a
+    missing one is not.
+    """
+    carried: dict[str, str] = {}
+    for key, heading in _CARRIED.items():
+        text = (row.get(key) or "").strip()
+        if not text:
+            continue
+        amount = _number(text)
+        carried[heading] = format_amount(amount) if amount is not None else text
+
+    for key, heading in _CARRIED_IDENTITY.items():
+        text = (identity.get(key) or "").strip()
+        if text:
+            carried[heading] = _tidy(text)
+    return carried
 
 
 def _tidy(text: str | None) -> str:
