@@ -69,6 +69,38 @@ Desktop.ini
 .idea/
 .claude/
 
+# --- Client data: CSV is the finance team's own format -----------------------
+# The reference files that define the mapping -- "TCN CIL.csv" and the BTK
+# Leasing file -- are client data, and this folder is exactly where they get
+# dropped for a quick comparison. Everything the project genuinely needs is a
+# .txt requirements file, so a blanket rule costs nothing and closes the most
+# likely accidental commit in the whole project.
+*.csv
+*.tsv
+
+# --- Secrets -----------------------------------------------------------------
+# Nothing here uses any of these today. They are listed so that the day someone
+# adds a deployment key or a connection string, git already refuses it.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+id_rsa*
+id_ed25519*
+*.ppk
+credentials.*
+secrets.*
+*_secret*
+*.pgpass
+
+# --- Anything a reviewer would have to explain --------------------------------
+# Deliberately last: git applies the final matching rule, so the isin/ exception
+# below this line is what keeps the distributed workbook committable.
+
 # --- ISIN workbook -----------------------------------------------------------
 # The workbook in isin/ IS distributed with the project, by decision: everyone
 # who clones gets the same pool and it is used without any configuration.
