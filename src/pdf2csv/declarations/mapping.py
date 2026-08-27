@@ -271,7 +271,7 @@ class Subscriber:
         """First word of a natural person's name; empty for a company.
 
         A legal entity has no forename to split off, and splitting one out of
-        ``UNION FINANCIERE SALAMMBO SICAV`` would produce a firstName of
+        ``UNION FINANCIERE EXEMPLE SICAV`` would produce a firstName of
         ``UNION``.
         """
         if self.is_entity or not self.name.strip():

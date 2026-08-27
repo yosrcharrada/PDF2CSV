@@ -196,12 +196,16 @@ concrete consequence, so none is cosmetic.
 
 It is the subscriber's securities account, and it decides two further columns:
 
-| Row | `code` | `BIC` | `amountToBePaid` |
+| Row | `code` (account, masked) | `BIC` | `amountToBePaid` |
 |---|---|---|---|
-| CIL | `TN31`**`CILT`**`0201021LFIN12364001` | `CILTTN00020` | 0 |
-| BTKL 1 | `TN50`**`AILE`**`0201021P00142218001` | `AILETN00020` | 0 |
-| BTKL 2 | `TN80`**`AILE`**`0201021P00142217001` | `AILETN00020` | 0 |
-| BTKL 3 | `TN62`**`UBCI`**`0201004LFIN09678001` | `UBCITNTT020` | 4 924 922,296 |
+| CIL | `TNxx`**`CILT`**`xxxxxxxxxxxxxxxxxxx` | `CILTTN00020` | 0 |
+| BTKL 1 | `TNxx`**`AILE`**`xxxxxxxxxxxxxxxxxxx` | `AILETN00020` | 0 |
+| BTKL 2 | `TNxx`**`AILE`**`xxxxxxxxxxxxxxxxxxx` | `AILETN00020` | 0 |
+| BTKL 3 | `TNxx`**`UBCI`**`xxxxxxxxxxxxxxxxxxx` | `UBCITNTT020` | the montant net |
+
+The digits are masked deliberately: this repository is public, and a real
+securities-account number is client data. Only the custodian prefix matters to
+the rule, and that is a bank identifier rather than an account.
 
 The four letters after the check digits are the custodian, `BIC` follows from
 them, and the amount is zero exactly where the subscriber holds with the
@@ -247,7 +251,7 @@ Two smaller problems needed answers:
   mid-word — `TUNISIENNECA` — so the cell is re-read from its own pixels,
   cut at the ruling line, where no such mistake is possible.
 - It **closes up the spaces in printed capitals**, so a name arrives as
-  `SELMAELLOUMIREKIK`. At twice the size it reads them as written, which is why
+  `MARIEDUPONTMARTIN`. At twice the size it reads them as written, which is why
   the identity columns are re-read enlarged. This is the deliberate exception to
   the warning in `core/ocr.py` against per-cell recognition: that warning is
   about losing context across a whole page of cells, and here the enlargement

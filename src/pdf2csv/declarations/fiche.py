@@ -203,7 +203,7 @@ _PROSE = frozenset(
         # Both of these are written into the CSV as the document states them,
         # so their word spacing is visible to whoever reads it. The libelle in
         # particular is the document's own name for the instrument -- closed up
-        # to "SERBTKL8.40%CD31072026" it is a good deal harder to check against
+        # to "SER BTKL 8.40% CD 31072026" it is a good deal harder to check against
         # the paper than "SER BTKL 8.40% CD 31072026".
         "libelle",
         "address",
@@ -480,7 +480,7 @@ def _reread(image: Any, y0: float, y1: float, x0: float, x1: float) -> str:
     the *image* at the ruling line cannot make that mistake.
 
     Separately, the recogniser closes up the spaces in printed capitals, so a
-    name arrives as ``SELMAELLOUMIREKIK`` and a client type as
+    name arrives as ``MARIEDUPONTMARTIN`` and a client type as
     ``PERSONNEMORALE``. At twice the size it reads them as written. That is the
     opposite of the warning in :mod:`pdf2csv.core.ocr` against per-cell
     recognition, and deliberately so: the warning is about losing surrounding
